@@ -1,0 +1,2 @@
+gcc dump.c   -o dump   -DLINUX -DDEBUG
+gcc inject.c -o inject -DLINUX -DDEBUG
