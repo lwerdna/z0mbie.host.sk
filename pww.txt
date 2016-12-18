@@ -1,0 +1,63 @@
+
+                              PERVERT WORLD WIDE
+                              ------------------
+
+  Almost   all   trojans   and  viruses  are detected using simple signatures.
+  Which   means      that  simple  crc is calculated on the entire file, or on
+  some parts of the code being checked.
+
+  There  are  thousands  of  simple signatures already stored in the antiviral
+  databases.  Each  signature  is  equivalent  to  hours  of  an aver's work.
+
+  Using  simple  length  disassembler  and  some  simple rules, it is possible
+  to   analyze   an  arbitrary   executable  file and change some instructions
+  in  it,  so  that it will run the same as before, but file's checksum   will
+  be changed.
+
+  This  means  that   antivirus will no longer be able to identify these files
+  by using the previous checksums.
+
+  A  tool    called   "Code   Pervertor"  was  written  some years ago. It can
+  analyze  a PE  file  and  swap a few equivalent  instructions, such as "test
+  eax, eax" with "or eax, eax" and vice versa.
+
+  Another   similar   process  is  "diversification",  which  means the random
+  changing  of   some   data  offsets  within  all  system  DLLs and services.
+  Diversification  complicates  exploitation  based on fixed address usage and
+  will probably soon be implemented as a security measure.
+
+  Now   imagine  that  some  worm "perverted" and "diversified" all executable
+  files  it  found  on  a  machines  over the net.  It is likely that the same
+  vulnerable  machines  will  also contain trojans.  So when all these trojans
+  become unique, what avers will do?
+
+  There are two methods of detecting such a modified files.
+
+  First   method  is to  modify  files  before  analyzing,  the  same as "code
+  pervertors"  do,  but  without  the  randomization.   For  example,  if some
+  instructions  can be  interchanged  with each other, perform one-way changes
+  only, for  example  replace  all  "or eax, eax" with "test eax, eax", but not
+  vice versa.
+
+  This   method   has  tons  of  negative aspects: there can be many different
+  methods     of     file     modification,   but   some   of   them  can   be
+  irreversible.
+
+  The   second   method  consists  of  re-writing  all   checksum   algorithms
+  and  recalculating   all  the signatures.  The new checksum algorithm should
+  become   invariant   to   simple   modifications   such  as  swapping  equal
+  or interchangable instructions with each other.
+
+  This method is something like image recognition, where the new algorithm can
+  return an equal result for many different data inputs.
+
+  This  method  also  has a serious disadvantage.  If someone introduced a new
+  file  modification method, the checksum algorithm will have to be once again
+  changed and all the antiviral signatures recalculated.
+
+  A  few  hundred infected machines with automatic "pervertors" will catch all
+  the  new  just-released  worms  and  viruses  and  modify  'em "on the fly",
+  automatically spawning new variants.
+
+
+                                                                    2004.03.01

@@ -1,0 +1,459 @@
+<html>
+<head>
+<title>Описание ф-ций INT 2E</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#000080 vlink=#551A8B>
+
+<h2 align=center>Описание INT 2E под Win9X<br>
+INT 2E services (VMM/NTKERN.VxD)</h2>
+
+<p align=center>(x) 2000 Z0MBiE<br>http://z0mbie.host.sk</p>
+
+<h3 align=center>Содержание</h3>
+
+<ul>
+<li><a href=#x1>Введение</a>
+<li><a href=#x2>Переход в RING-0</a>
+   <ul>
+   <li><a href=#x2a>PsCreateSystemThread</a>
+   <li><a href=#x2b>PoCallDriver</a>
+   </ul>
+<li><a href=#x3>Работа с памятью</a>
+   <ul>
+   <li><a href=#x3a>RtlCopyMemory, RtlMoveMemory</a>
+   <li><a href=#x3b>READ_REGISTER_BUFFER_UCHAR/ULONG/USHORT</a>
+   <li><a href=#x3c>WRITE_REGISTER_BUFFER_UCHAR/ULONG/USHORT</a>
+   <li><a href=#x3d>READ_REGISTER_UCHAR/ULONG/USHORT</a>
+   <li><a href=#x3e>WRITE_REGISTER_UCHAR/ULONG/USHORT</a>
+   </ul>
+<li><a href=#x4>Работа с портами</a>
+   <ul>
+   <li><a href=#x4a>READ_PORT_BUFFER_UCHAR/ULONG/USHORT</a>
+   <li><a href=#x4b>WRITE_PORT_BUFFER_UCHAR/ULONG/USHORT</a>
+   <li><a href=#x4c>READ_PORT_UCHAR/ULONG/USHORT</a>
+   <li><a href=#x4d>WRITE_PORT_UCHAR/ULONG/USHORT</a>
+   </ul>
+<li><a href=#x5>Процессы и нити</a>
+   <ul>
+   <li><a href=#x5a>IoGetCurrentProcess, PsGetCurrentProcess</a>
+   <li><a href=#x5a>KeGetCurrentThread, PsGetCurrentThread</a>
+   </ul>
+<li><a href=#x6>Прочие функции</a>
+   <ul>
+   <li><a href=#x6a>KeQuerySystemTime</a>
+   </ul>
+<li><a href=#x7>Комментарии</a>
+</ul>
+
+<a name=x1>
+<h3 align=center>Введение</h3>
+
+<p>Рассмотрим некую Win32-программу.
+  Как известно, программа эта вызывает kernel, а kernel уже вызывает ring-0.
+
+<p>Под Win9X VMM/VWIN32 реализует специальные сервисы для kernelа.
+  Вызываются они так:
+
+<pre>
+       kernel@int21:
+  015F:BFF712B9  push    ecx
+                 push    eax
+                 push    002A0010    ; <-- service-number
+                 call    kernel@ord0
+                 ret
+       kernel@ord0:
+  015F:BFF713D4  mov     eax, [esp+4]
+                 pop     dword ptr [esp]
+                 call    far cs:[BFFC9734]
+                 ...
+  015F:BFF79734  dd      000003C8h   ; offset
+                 dw      003Bh       ; selector
+                 ...
+  003B:03C8      int     30h
+                 ...
+</pre>
+
+<p>где service-number -- номер сервиса, например 0x002A0010 для INT 21,
+  0x002A0029 для INT 31, и так далее. Надо сказать, что с номерами
+  VxD-callов эти сервисы не имеют ничего общего. Найти полный список
+  соответствий всяких номеров именам сервисов можно в питреке.
+
+<p>Под WinNT ноль вызывается из кернела посредством INT 2E.
+
+<p>Но, как выяснилось, в маздае в VMMе существует NTKERN.VXD, коий
+  реализует NT-евые сервисы. Называются они типа ntoskrnl!DbkBreakPoint  и
+  вызываются так же -- через INT 2E.
+  И, о чудо, у такого рулезного инта DPL=3, то есть его можно вызывать
+  прямо из PE файла.
+  Более того, в обработчике нет никаких хитрожопых проверок - типа
+  откуда пришел вызов.
+
+<p>Дальше-интереснее. Оказывается, INT 2E активно используется
+  при загрузке маздая. А во  время работы  маздай может пользовать
+  функции типа ntoskrnl!NtPowerInformation.
+
+<p>Короче говоря, можно вызывать INT 2E из PE файлов одним из следующих
+  способов:
+
+<pre>
+; 1.
+        mov     eax, service-number
+        lea     edx, stk
+        int     2Eh
+
+stk:    dd      param1
+        dd      param2
+        dd      param3
+        ...
+; 2.
+        ...
+        push    param3
+        push    param2
+        push    param1
+        mov     edx, esp
+        mov     eax, service-number
+        int     2Eh
+        add     esp, 4*n
+</pre>
+
+<p>Как видим, при вызове INT 2E в EAX должен быть номер сервиса,
+  а в EDX указатель на кадр стэка.
+  Перед тем как вызвать соответствующую функцию, обработчик инта
+  копирует данные из *EDX в свой стэк.
+
+<p>Список всех номеров и имен функций лежит в <a href="ntoskrnl.inc">ntoskrnl.inc</a>
+
+<p>Далее идут описания некоторых наиболее интересных функций INT 2E.
+
+<a name=x2>
+<h3 align=center>Переход в RING-0</h3>
+
+<a name=x2a>
+<p><big>PsCreateSystemThread</big>
+
+<p>Тут все и так ясно. Создаем нить прямо в нуле. При выходе из нити (по RET)
+она автоматически убивается ф-цией PsTerminateSystemThread.
+
+<pre>
+                        ...
+                        mov     eax, i2E_PsCreateSystemThread
+                        lea     edx, stk
+                        int     2Eh
+
+__cycle:                cmp     r0_finished, 1
+                        jne     __cycle
+                        ...
+
+stk:                    dd      offset thread_handle ; 0 or *thread_handle
+                        dd      0               ; 0 or 0x1F03FF
+                        dd      0               ; 0
+                        dd      0               ; 0
+                        dd      0               ; 0
+                        dd      offset ring0    ; thread EIP, near proc
+                        dd      12345678h       ; thread-parameter
+
+; input: [ESP+4]=EDI=thread_parameter
+
+ring0:                  int 3
+                        mov     r0_finished, 1
+                        ret
+</pre>
+
+<a name=x2b>
+<p><big>PoCallDriver</big>
+
+<p>Никакими драйверами тут и не пахнет. Эта функция просто передает
+управление (в нуле) туда, куда ей скажут.
+Единственный минус -- ей надо уж очень по-изъебски передавать параметры.
+Кадр стэка выглядит так:
+
+<pre>
+stk                     dd      offset x1
+                        dd      offset x2
+x1                      db      8 dup (0)
+                        dd      offset x3
+x2                      db      60h dup (0)
+                        dd      offset x4+24h
+x4                      db      18h dup (0)
+x3                      db      38h dup (0)
+                        dd      ring_0
+</pre>
+
+<p>А реальный код, коий я по возможности соптимизировал, такой:
+
+<pre>
+                        lea     esi, r0proc
+                        call    callring0
+                        ...
+r0proc:                 int 3
+                        ret
+
+; subroutine: callring0
+; input:      ESI=offset ring_0, proc NEAR
+
+callring0:              pusha
+                        call    @@X
+                        pusha
+                        call    dword ptr [ecx]
+                        popa
+                        ret     8
+@@X:                    sub     esp, 14h
+                        xor     eax, eax
+                        push    eax
+                        lea     edx, [esp+24h]
+                        push    edx
+                        sub     esp, 54h
+                        lea     edx, [esp+38h]
+                        push    edx
+                        push    edx
+                        push    esi
+                        mov     edx, esp
+                        push    edx
+                        push    edx
+                        mov     edx, esp
+                        mov     al, i2E_PoCallDriver
+                        int     2Eh
+                        popa
+                        add     esp, 88h-20h
+                        popa
+                        ret
+</pre>
+
+<a name=x3>
+<h3 align=center>Работа с памятью</h3>
+
+<p>Эти функции подразумевают работу с памятью через нулевое кольцо.
+Это значит, что вы из третьего кольца передаете параметры, а
+в нуле производятся чтение/запись памяти. Таким образом можно читать/писать
+в защищенную в третьем кольце память, например в kernel.
+
+<p>Причем для работы с памятью из нуля существует просто охуительное
+количество всяких функций, включая всякие InterlockedIncrement'ы и
+функции для работы со строками, юникодными и не очень.
+
+<a name=x3a>
+<p><big>RtlCopyMemory, RtlMoveMemory</big>
+
+<p>Отличаются эти две функции тем, что RtlCopyMemory просто берет и
+копирует буфера командой movs,
+а RtlMoveMemory сначала анализирует esi и edi, а потом копирует буфер по
+одному байту, причем начиная либо с начала либо с конца буфера.
+Таким образом RtlMoveMemory корректно обработает перекрывающиеся области
+esi...esi+ecx и edi...edi+ecx.
+
+<pre>
+                        mov     eax, i2E_RtlCopyMemory  ; or RtlMoveMemory
+                        lea     edx, stk
+                        int     2Eh
+                        ...
+stk:                    dd      0BFF7xxxxh      ; edi (destination)
+                        dd      offset vir_code ; esi (source)
+                        dd      vir_size        ; ecx (length in bytes)
+</pre>
+
+<a name=x3b>
+<p><big>READ_REGISTER_BUFFER_UCHAR/ULONG/USHORT</big>
+
+<p>Реализации команд REP MOVSB, REP MOVSD и REP MOVSW соответственно.
+
+<pre>
+                        push    ecx
+                        push    edi
+                        push    esi
+                        mov     edx, esp
+                        mov     eax, i2E_READ_REGISTER_BUFFER_ULONG
+                        int     2Eh
+                        add     esp, 3*4
+</pre>
+
+<a name=x3c>
+<p><big>WRITE_REGISTER_BUFFER_UCHAR/ULONG/USHORT</big>
+
+<p>Аналогично предыдущим: REP MOVSB, REP MOVSD и REP MOVSW,
+НО источник и приемник поменялись местами.
+
+<pre>
+                        push    ecx
+                        push    esi
+                        push    edi
+                        mov     edx, esp
+                        mov     eax, i2E_WRITE_REGISTER_BUFFER_ULONG
+                        int     2Eh
+                        add     esp, 3*4
+</pre>
+
+<a name=x3d>
+<p><big>READ_REGISTER_UCHAR/ULONG/USHORT</big>
+
+<p>Считать BYTE/DWORD/WORD.
+(MOV AL,[ESI], MOV EAX,[ESI] и MOV AX,[ESI])
+Значение возвращается в EAX.
+
+<pre>
+                        push    esi
+                        mov     edx, esp
+                        mov     eax, i2E_READ_REGISTER_UCHAR
+                        int     2Eh
+                        add     esp, 1*4
+</pre>
+
+<a name=x3e>
+<p><big>WRITE_REGISTER_UCHAR/ULONG/USHORT</big>
+
+<p>Записать BYTE/DWORD/WORD.
+(MOV [EDI],AL, MOV [EDI],EAX и MOV [EDI],AX)
+
+<pre>
+                        push    eax
+                        push    edi
+                        mov     edx, esp
+                        mov     eax, i2E_WRITE_REGISTER_UCHAR
+                        int     2Eh
+                        add     esp, 2*4
+</pre>
+
+<a name=x4>
+<h3 align=center>Работа с портами</h3>
+
+<a name=x4a>
+<p><big>READ_PORT_BUFFER_UCHAR/ULONG/USHORT</big>
+
+<p>Выполнить REP INSB, REP INSD и REP INSW соответственно.
+
+<pre>
+                        push    ecx
+                        push    edi
+                        push    edx
+                        mov     edx, esp
+                        mov     eax, i2E_READ_PORT_BUFFER_ULONG
+                        int     2Eh
+                        add     esp, 3*4
+</pre>
+
+<a name=x4b>
+<p><big>WRITE_PORT_BUFFER_UCHAR/ULONG/USHORT</big>
+
+<p>REP OUTSB, REP OUTSD и REP OUTSW
+
+<pre>
+                        push    ecx
+                        push    esi
+                        push    edx
+                        mov     edx, esp
+                        mov     eax, i2E_WRITE_PORT_BUFFER_ULONG
+                        int     2Eh
+                        add     esp, 3*4
+</pre>
+
+<a name=x4c>
+<p><big>READ_PORT_UCHAR/ULONG/USHORT</big>
+
+<p>Выполнить IN AL,DX, IN EAX,DX и IN AX,DX соответственно.
+
+<pre>
+                        push    edx
+                        mov     edx, esp
+                        mov     eax, i2E_READ_PORT_ULONG
+                        int     2Eh
+                        add     esp, 1*4
+</pre>
+
+<a name=x4d>
+<p><big>WRITE_PORT_UCHAR/ULONG/USHORT</big>
+
+<p>OUT DX,AL, OUT DX,EAX и OUT DX,AX.
+
+<pre>
+                        push    eax
+                        push    edx
+                        mov     edx, esp
+                        mov     eax, i2E_WRITE_PORT_UCHAR
+                        int     2Eh
+                        add     esp, 2*4
+</pre>
+
+<a name=x5>
+<h3 align=center>Процессы и нити</h3>
+
+<a name=x5a>
+<p><big>IoGetCurrentProcess, PsGetCurrentProcess</big>
+
+<p>Обе функции указывают на один и тот же обработчик. Хендл текущего
+процесса возвращается в EAX.
+
+<pre>
+                        mov     eax, i2E_IoGetCurrentProcess
+                        int     2Eh
+</pre>
+
+<p>Обработчик GetCurrentProcess'а изнутри реализует следующее:
+
+<pre>
+                        call    ntoskrnl!KeGetCurrentThread
+                        mov     eax, [eax+4]
+                        ret
+</pre>
+
+<a name=x5b>
+<p><big>KeGetCurrentThread, PsGetCurrentThread</big>
+
+<p>Опять один и тот же обработчик. Хендл текущей
+нити возвращается в EAX.
+
+<pre>
+                        mov     eax, i2E_KeGetCurrentThread
+                        int     2Eh
+</pre>
+
+<a name=x6>
+<h3 align=center>Прочие функции</h3>
+
+<a name=x6a>
+<p><big>KeQuerySystemTime</big>
+
+<pre>
+                        push    offset systime
+                        mov     edx, esp
+                        mov     eax, i2E_KeQuerySystemTime
+                        int     2Eh
+                        add     esp, 4
+                        ...
+systime                 dq      ?
+</pre>
+
+<a name=x7>
+<h3 align=center>Коментарии</h3>
+
+<p>Совершенно непонятно как обстоит дело с функциями для работы с файлами.
+(IoCreateFile, NtCreateFile, ZwCreateFile, ZwReadFile, ZwWriteFile,
+DeviceIoControlFile, etc.)
+Я слышал, есть книжка про недокументированные возможности WinNT.
+Но те параметры, которые там описаны для соответствующих функций, передаются
+из программы в кернел, а ведь из кернела в ноль передаются уже совсем
+другие вещи, даже число параметров не совпадает. Ну а трассировать
+обработчик CreateFile выясняя все его 11 хитроизъебских параметров --
+как-то лениво.
+
+<p>Существуют также функции для работы с registry.
+(RtlDeleteRegistryValue, RtlQueryRegistryValues, RtlWriteRegistryValue,
+IoOpenDeviceInterfaceRegistryKey, IoOpenDeviceRegistryKey,
+может быть -- ZwCreateKey, ZwDeleteKey, ZwEnumerateKey, ZwEnumerateValueKey,
+ZwOpenKey и т.п.)
+Этих функция я не проверял, но они явно показывают на какой-то нормальный
+код и могут быть вызваны.
+
+<p>Большинство функций, для которых не указано число параметров (в
+<a href="ntoskrnl.inc">ntoskrnl.inc</a> написан '-'),
+являются ВНУТРЕННИМИ, то есть параметры им передаются,
+но не на стэке а в регистрах, и вызвать их, минуя похеривание
+регистров в обработчике INT 2E нет никакой возможности.
+Обычно эти функции написаны полностью маленькими буквами или
+начинаются с подчеркивания, типа memmove, memset, qsort, rand, sprintf,
+_except_handler2, _global_unwind2 и т.п.
+
+<p align=center>* * *</p>
+
+<p>см. также примеры в <a href="ntoskrnl.zip">ntoskrnl.zip</a>
+
+<p align=right>(c) 

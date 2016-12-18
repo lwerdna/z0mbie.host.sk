@@ -1,0 +1,46 @@
+
+                               VMware has you
+                               --------------
+
+     When  avers  catch  your  virus,  they  analyze it. In case of complex
+ networking  creature,  they  must  learn  how  it  spreads. How it infects
+ computers via network. How it infects files. There exists some programs to
+ emulate  virtual  OS'es  on  the single machine. This is the best solution
+ when  you need to study some virus without risk to fuckup your own system.
+ So,  there  appears  a  question:  how to find out if our virus is running
+ under virtual OS.
+
+     One  of  such  programs  is  VMware.  It  has  own "backdoor" port, to
+ communicate  between  internal  (emulated)  and  exernal (emulating) code.
+ There   are   some  functions,  which  allows  you  (under  emulation)  to
+ enable/disable  different  virtual devices, send internal messages, and do
+ other  things.  Here  is  how  these  functions are called (you should use
+ exception handling for this code):
+
+        mov     ecx, 0Ah    ; CX=function# (0Ah=get_version)
+        mov     eax, 'VMXh' ; EAX=magic
+        mov     dx, 'VX'    ; DX=magic
+        in      eax, dx     ; specially processed io cmd
+        ; output: EAX/EBX/ECX = data
+        cmp     ebx, 'VMXh' ; also eax/ecx modified (maybe vmw/os ver?)
+        je      under_VMware
+
+  VMware registry keys are
+
+    HKLM\Software\VMware, Inc.\VMware for Windows NT     -- real
+    HKLM\Software\VMWare, Inc.\VMware Tools\             -- virtual
+
+  VMware executables directory is
+
+    C:\Program Files\VMware     -- both real and virtual
+
+     There  can be many different methods to detect if you're under virtual
+ OS,  such  as  incorrectly  emulated  ports,  predetermined hardware info,
+ special drivers and other things.
+
+     About  actions  to  be performed under virtual OS, well, it depends on
+ your  wicked  souls  --  from  fucking up everything, which will result in
+ minor  time  loss,  to  perverting  virus  strategy,  which  may result in
+ misunderstanding your code and make emulation useless.
+
+                                   * * *

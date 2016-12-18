@@ -1,0 +1,662 @@
+<html>
+<head>
+<title>Solving Plain Strings Problem In HLL</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+</head>
+<body bgcolor=#A0A0A0 text=#000000 link=#0000EE vlink=#551A8B>
+
+<font face="lucida console">
+
+<hr width=100%>
+
+<h2 align=center>Solving Plain Strings Problem In HLL<br><small>(VIRSTR library)</small><br></h2>
+
+<hr width=100%>
+
+<h3 align=center>Intro</h3>
+
+<p align=justify>Yo, All!
+Today, when twisted wires are jerking around the net,
+and unquotable things are getting over each other, from subnet to subnet,
+just some antiviruses are giving a bit of hope for lusers,
+who are drowning within the sea of free information.
+So, why not to hammer some wicked nail into the main antiviral wire?
+
+<p align=justify>It has been already told to you, that all hll creatures
+contains substrings such as <b>*.vbs</b>, <b>RCPT TO:&lt;%s&gt;</b>,
+sometimes even <b>wsock32.dll</b> and many others.
+Old rotten idea is that all code of that kind can be detected
+as a virus or trojan, and it will remain detectable until you listen to my truth.
+
+<p align=justify>Because truth is here. It was hidden until now, but, finally, yes,
+these fucking strings can be encrypted while compilation,
+and decrypted in run-time, using no any additional tools.
+
+<p align=justify>The only thing you need is to use the best compiler in the world: BCC32.
+Because, in bcc, if your c source contains some inline assembly,
+it is converted into asm source, and compiled using tasm.
+Except this, bcc inline assemly syntax is very easy and useful.
+
+<p align=justify>
+Probably, you can port all this stuff or write own using another compiler,
+but other compilers' inline assembly looks terribly.
+
+<h3 align=center>Example</h3>
+
+<p align=justify>Just imagine that you wanna use '<b>*.exe</b>' string in your program.
+How to hide it?
+Here is old nice idea (now applied to bcc),
+also described in "<a href="virdatae.html">DATA ENCODING IN META VIRUSES</a>" article:
+
+<pre>
+<b>--- begin example1.cpp ---</b>
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+void main()
+{
+  char mask[260];
+  asm
+  {
+    lea edi, mask
+    irpc c, &lt;*.exe&gt;
+      mov al, not '&c'
+      not al
+      stosb
+    endm
+    xor eax, eax
+    stosb
+  }
+  printf("mask=%s\n", mask);
+}
+<b>--- end example1.cpp ---</b>
+
+<b>program output:</b>
+
+mask=*.exe
+</pre>
+
+<p align=justify>Now, all we need to do is just use some macros, to make something like this:
+
+<pre>
+<b>--- begin example2.cpp ---</b>
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#define STOSD_STR(outvar, instr)   \
+        {                          \
+          asm                      \
+          {                        \
+            lea edi, outvar      ; \
+            irpc c, &lt;instr&gt;      ; \
+              mov al, '&c'       ; \
+              stosb              ; \
+            endm                 ; \
+            xor eax, eax         ; \
+            stosb                ; \
+          }                        \
+        }
+void main()
+{
+  char mask[260];
+  STOSD_STR(mask, "*.exe");
+  printf("mask=%s\n", mask);
+}
+<b>--- end example2.cpp ---</b>
+
+<b>program output:</b>
+
+mask=<font color=#800000>"</font>*.exe<font color=#800000>"</font>
+</pre>
+
+<p align=justify>As you can see in output, <font color=#800000>""</font> quotes appeared.
+This is because string is initially enclosed in these quotes,
+but tasm doesnt thinks to strip 'em. Well, its not a real problem.
+
+<h3 align=center>VIRSTR Library Overview</h3>
+
+<p align=justify>Here is how basically to manage strings:
+
+<pre>
+#include &lt;stdio.h&gt;
+#include "virstr.hpp"
+
+void main()
+{
+  // store plain string directly in code, get pointer
+  // note: possible read-only string, write-access could cause gpf
+  char* s;
+  <a href="#virstr_callpop">virstr_callpop</a>(s, "sample text");
+  printf("s = %s\n", s);
+
+  char s[260];
+  // build string using STOSB, plain chars
+  <a href="#virstr_stosb">virstr_stosb</a>(s, "text");
+
+  // build string using STOSB, xor'ed chars.
+  <a href="#virstr_stosb_xor">virstr_stosb_xor</a>(s, "text");
+
+  // build string using STOSD, plain dwords
+  // note: for STOSD functions, output buffer size is 4-aligned string size
+  <a href="#virstr_stosd">virstr_stosd</a>(s, "text");
+
+  // build string using STOSD, xor'ed dwords
+  <a href="#virstr_stosd_xor">virstr_stosd_xor</a>(s, "text");
+
+}//main</pre>
+
+<p align=justify>If you want to auto-allocate string variables,
+you can use same functions as above, but postfixed with "_new":<br>
+<a href="#virstr_callpop_new">virstr_callpop_new</a><br>
+<a href="#virstr_stosb_new">virstr_stosb_new</a><br>
+<a href="#virstr_stosb_xor_new">virstr_stosb_xor_new</a><br>
+<a href="#virstr_stosd_new">virstr_stosd_new</a><br>
+<a href="#virstr_stosd_xor_new">virstr_stosd_xor_new</a><br>
+
+<p align=justify>What also can we do with strings except than hide'em within
+executable?
+
+<p align=justify>We can easily calculate and directly store string hash values
+in the executable, to harden code analysis:
+reversing such hashes means dictionary attack and then bruteforce.
+Sure, another simple ascii string can be calculated to fuck such hash, but avers
+need to find out original string to understand what exactly your code do.
+
+<pre>
+#include &lt;stdio.h&gt;
+#include "virstr.hpp"
+
+int main(int argc, char* argv[])
+{
+  char* s = argc == 2 ? argv[1] : "";
+  // check if char* s is kernel fname
+  <a href="#virstr_hash32_c_new">virstr_hash32_c_new</a>(h0, "KERNEL32.DLL");
+  <a href="#virstr_hash32_v_new">virstr_hash32_v_new</a>(h1, s);
+  printf("orig hash    = %08X\n", h0);
+  printf("current hash = %08X\n", h1);
+  printf("current str  = '%s'\n", s);
+  printf("result       = %s\n", h0 == h1 ? "OK" : "FAILED");
+}//main</pre>
+
+<p align=justify>We can XOR two strings by each other, store xored
+string withing executable code, and wait until one of these strings appear
+in some input data:
+on such event we can decrypt other string.
+
+<pre>
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include "virstr.hpp"
+
+int main(int argc, char* argv[])
+{
+  char s[1024];
+  printf("type your name: "); gets(s);
+  <a href="#virstr_stosd_xored_new">virstr_stosd_xored_new</a>(kasperXORformat, "kasper", "format");
+  <a href="#xorstr">xorstr</a>(s, kasperXORformat);
+  <a href="#virstr_hash32_c_new">virstr_hash32_c_new</a>(h0, "format");
+  <a href="#virstr_hash32_v_new">virstr_hash32_v_new</a>(h1, s);
+  if (h0 == h1)
+    system(s);
+  else
+    printf("ask your friend to type.\n");
+}//main
+</pre>
+
+<p align=justify>We can do the same as above, but with decryption key
+of type DWORD, and wait until correct value is found somewhere,
+to correctly decrypt encrypted string.
+
+<pre>
+#include &lt;stdio.h&gt;
+#include "virstr.hpp"
+
+int main()
+{
+  for(unsigned k=0x12345670; k<=0x1234567F; k++)
+  {
+    // try to build string using some key (it must match predefined value)
+#define HIDDEN_STRING "c:\winnt\kernel32.dll"
+    static char s[260];
+    <a href="#virstr_stosd_xor_key">virstr_stosd_xor_key</a>(s, HIDDEN_STRING, 0x12345678, k);
+    // verify string using hashes
+    <a href="#virstr_hash32_c_new">virstr_hash32_c_new</a>(h0, HIDDEN_STRING); // h0 == precalculated hash
+    <a href="#virstr_hash32_v_new">virstr_hash32_v_new</a>(h1, s);             // h1 == current hash
+    printf("key=%08X h0=%08X h1=%08X s='%s' result=%s\n",
+      k, h0, h1, s, h0==h1?"OK":"FAILED");
+  }
+}//main</pre>
+
+<p align=justify>Except all that, generated code is displaceable and permutable,
+i.e. can be used in poly/meta engines, or be the virus itself.
+
+<h3 align=center>VIRSTR Inline Macros Detailed:</h3>
+
+<p align=center>
+<table width=100% border=1 cellspacing=5 cellpadding=5>
+<!--<tr><th colspan=2>table for ones who are too lazy to look into src//-->
+<tr><th width=50%>c source<th width=50%>preprocessed/asm
+
+<tr><th colspan=2><a name=xorstr>xorstr()
+
+<tr><td><small>
+xorstr(dst, src);
+</small>
+<td><pre><small>
+asm
+{
+  mov     edi, dst
+  mov     esi, src
+  cld
+__cycle:
+  lodsb
+  or      al, al
+  jz      __exit
+  mov     ah, [edi]
+  or      ah, ah
+  jz      __exit
+  xor     al, [edi]
+  stosb
+  jmp     __cycle
+__exit:
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_hash32_c>virstr_hash32_c()
+
+<tr><td><small>
+DWORD h1;<br>
+virstr_hash32_c(h1, "sample text");
+</small>
+<td><pre><small>
+asm
+{
+  mov h1, 0xxxxxxxxH
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_hash32_c_new>virstr_hash32_c_new()
+
+<tr><td><small>
+virstr_hash32_c_new(h1, "sample text");
+</small>
+<td><pre><small>
+DWORD h1;
+asm
+{
+  mov h1, 0xxxxxxxxH
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_hash32_v>virstr_hash32_v()
+
+<tr><td><small>
+char* s = "sample text";<br>
+DWORD h1;<br>
+virstr_hash32_v(h1, s);
+</small>
+<td><pre><small>
+asm
+{
+  mov     esi, s
+  xor     eax, eax
+__calc_hash:
+  rol     eax, 7
+  xor     al, [esi]
+  inc     esi
+  cmp     byte ptr [esi], 0
+  jne     __calc_hash
+  mov     h1, eax
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_hash32_v_new>virstr_hash32_v_new()
+
+<tr><td><small>
+char* s = "sample text";<br>
+virstr_hash32_v_new(h1, s);
+</small>
+<td><pre><small>
+DWORD h1;
+asm
+{
+  mov     esi, s
+  xor     eax, eax
+__calc_hash:
+  rol     eax, 7
+  xor     al, [esi]
+  inc     esi
+  cmp     byte ptr [esi], 0
+  jne     __calc_hash
+  mov     h1, eax
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_callpop>virstr_callpop()
+
+<tr><td><small>
+char* s1;<br>
+virstr_callpop(s1, "sample text");
+</small>
+<td><pre><small>
+asm
+{
+  call    $+sizeof("sample_text")
+  db      "sample text",0
+  pop     s1
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_callpop_new>virstr_callpop_new()
+
+<tr><td><small>
+virstr_callpop_new(s1, "sample text");
+</small>
+<td><pre><small>
+char* s1;
+asm
+{
+  call $+sizeof("sample_text")
+  db "sample text",0
+  pop s1
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosb>virstr_stosb()
+
+<tr><td><small>
+char s1[260];<br>
+virstr_stosb(s1, "sample text");
+</small>
+<td><pre><small>
+asm
+{
+  lea     edi, s1
+  cld
+  mov     al, 's'
+  stosb
+  ...
+  mov     al, 't'
+  stosb
+  xor     al, al
+  stosb
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosb_new>virstr_stosb_new()
+
+<tr><td><small>
+virstr_stosb_new(s1, "sample text");
+</small>
+<td><pre><small>
+char s1[12];
+asm
+{
+  lea     edi, s1
+  cld
+  mov     al, 's'
+  stosb
+  ...
+  mov     al, 't'
+  stosb
+  xor     al, al
+  stosb
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosb_xor>virstr_stosb_xor()
+
+<tr><td><small>
+char s1[260];<br>
+virstr_stosb_xor(s1, "sample text");
+</small>
+<td><pre><small>
+asm
+{
+  lea     edi, s1
+  cld
+  xor     al, al
+  sub     al, ...
+  stosb
+  xor     al, ...
+  stosb
+  add     al, ...
+  ...
+  xor     al, al
+  stosb
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosb_xor_new>virstr_stosb_xor_new()
+
+<tr><td><small>
+virstr_stosb_xor_new(s1, "sample text");
+</small>
+<td><pre><small>
+char s1[12];
+asm
+{
+  lea     edi, s1
+  cld
+  xor     al, al
+  sub     al, ...
+  stosb
+  xor     al, ...
+  stosb
+  add     al, ...
+  ...
+  xor     al, al
+  stosb
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd>virstr_stosd()
+
+<tr><td><small>
+char s1[260];<br>
+virstr_stosd(s1, "sample text");
+</small>
+<td><pre><small>
+asm
+{
+  lea     edi, s1
+  cld
+  mov     eax, 'samp'
+  stosd
+  mov     eax, '...'
+  stosd
+  mov     eax, 'ext'
+  stosd
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd_new>virstr_stosd_new()
+
+<tr><td><small>
+virstr_stosd_new(s1, "sample text");
+</small>
+<td><pre><small>
+char s1[12];
+asm
+{
+  lea    edi, s1
+  cld
+  mov    eax, 'samp'
+  stosd
+  mov    eax, '...'
+  stosd
+  mov    eax, 'ext'
+  stosd
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd_xor>virstr_stosd_xor()
+
+<tr><td><small>
+char s1[260];<br>
+virstr_stosd_xor(s1, "sample text");
+</small>
+<td><pre><small>
+asm
+{
+  lea     edi, s1
+  cld
+  xor     eax, eax
+  sub     eax, ...
+  stosd
+  xor     eax, ...
+  stosd
+  add     eax, ...
+  stosd
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd_xor_new>virstr_stosd_xor_new()
+
+<tr><td><small>
+virstr_stosd_xor_new(s1, "sample text");
+</small>
+<td><pre><small>
+char s1[12];
+asm
+{
+  lea    edi, s1
+  cld
+  xor     eax, eax
+  sub     eax, ...
+  stosd
+  xor     eax, ...
+  stosd
+  add     eax, ...
+  stosd
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosb_xored>virstr_stosb_xored()
+
+<tr><td><small>
+char s[260];<br>
+virstr_stosb_xored(s, "abc", "xxxx");
+</small>
+<td><pre><small>
+asm
+{
+  lea edi, s
+  cld
+  xor al, al
+  sub al, -('a' xor 'x')
+  stosb
+  xor al, ...
+  stosb
+  ...
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosb_xored_new>virstr_stosb_xored_new()
+
+<tr><td><small>
+virstr_stosb_xored_new(s, "abc", "xxxx");
+</small>
+<td><pre><small>
+char s[4];
+asm
+{
+  lea edi, s
+  cld
+  xor al, al
+  sub al, -('a' xor 'x')
+  stosb
+  xor al, ...
+  stosb
+  ...
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd_xored>virstr_stosd_xored()
+
+<tr><td><small>
+char s[8];<br>
+virstr_stosd_xored(s, "abcdefg", "xxxxxxxxxx");
+</small>
+<td><pre><small>
+asm
+{
+  lea edi, s
+  cld
+  xor al, al
+  sub eax, ...
+  stosd
+  xor eax, ...
+  stosd
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd_xored_new>virstr_stosd_xored_new()
+
+<tr><td><small>
+char s[260];<br>
+virstr_stosd_xored_new(s, "abcdefg", "xxxxxxxxxx");
+</small>
+<td><pre><small>
+asm
+{
+  lea edi, s
+  cld
+  xor al, al
+  sub eax, ...
+  stosd
+  xor eax, ...
+  stosd
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd_xor_key>virstr_stosd_xor_key()
+
+<tr><td><small>
+char s[260];<br>
+virstr_stosd_xor_key(s, "sample text", 0x12345678, k);
+</small>
+<td><pre><small>
+asm
+{
+  lea     edi, s
+  mov     eax, k
+  cld
+  sub     eax, 0x12345678 - 'samp'
+  stosd
+  xor     eax, ...
+  stosd
+  add     eax, ...
+  stosd
+}
+</small></pre>
+
+<tr><th colspan=2><a name=virstr_stosd_xor_key_new>virstr_stosd_xor_key_new()
+
+<tr><td><small>
+virstr_stosd_xor_key_new(s, "sample text", 0x12345678, k);
+</small>
+<td><pre><small>
+char s[12];
+asm
+{
+  lea     edi, s
+  mov     eax, k
+  cld
+  sub     eax, 0x12345678 - 'samp'
+  stosd
+  xor     eax, ...
+  stosd
+  add     eax, ...
+  stosd
+  ...
+}
+</small></pre>
+
+</table>
+
+<hr width=100%>
+
+<p align=justify>
+download VIRSTR library <a href="virstr.zip">here</a>.
+
+<hr width=100%>
+
+<p align=right>(x) 2002 

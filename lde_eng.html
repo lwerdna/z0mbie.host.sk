@@ -1,0 +1,70 @@
+<html>
+<head>
+<title>LDE32 -- Length Disassembler Engine -- User's Manual</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B4C4B4 text=#000000 link=#0000EE vlink=#551A8B
+background="bkgr.gif">
+
+<h1 align=center>LDE32 -- Length-Disassembler Engine</h1>
+
+<h2 align=center>User's Manual</h2>
+
+<hr><br>
+<p align=center>[<a href="lde_rus.html">Русский</a>] [English]</p>
+<hr><br>
+
+<p>LDE32 is a library which may be used to determine length of any x86
+instructiion, i.e. to provide partial disassembling.</p>
+
+<p>LDE32 has only two subroutines.</p>
+
+<p>1. <code><font color=#000055>void pascal disasm_init(void* tableptr);</font></code></p>
+
+<p>This subroutine used to build internal data table of 2048 byte length.</p>
+
+<p>2. <code><font color=#000055>int pascal disasm_main(void* opcodeptr, void* tableptr);</font></code></p>
+
+<p>This subroutine used to disassemble one instruction.
+It returns length of instruction in bytes, or -1 if an error occured.</p>
+
+<p>Subroutines preserves all registers; code is offset-independent; no
+data used except 2k at *tableptr.</p>
+
+<p>To include LDE32 into your source you should add the following line:</p>
+
+<p><code><font color=#000055>include lde32bin.inc</font></code></p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>example
+<tr>
+<td>
+<pre><font color=#000055>
+                push    offset tbl      ; <i>build disasm flag tables</i>
+                call    disasm_init
+
+                mov     ebx, 401000h
+cycle:
+                push    ebx             ; <i>disasm offset</i>
+                push    offset tbl      ; <i>internal disasm table</i>
+                call    disasm_main
+
+                add     ebx, eax
+
+                cmp     eax, -1         ; <i>error?</i>
+                jne     cycle
+
+include         lde32bin.inc            ; <i>LDE32 code</i>
+
+tbl             db      2048 dup (?)    ; <i>internal LDE32 data</i>
+</font></pre>
+</table>
+
+<br>
+<hr><br>
+
+<p align=center>programmed in 1999 by Z0MBiE, <a href="http://z0mbie.host.sk">http://z0mbie.host.sk</a></p>
+
+</body>
+</html>

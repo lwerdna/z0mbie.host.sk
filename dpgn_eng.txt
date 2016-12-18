@@ -1,0 +1,271 @@
+
+                               "DELAYED CODE"
+                                 technology
+
+                                version 1.1
+
+[*] Introduction
+
+    Let we wrote a virus. Avers will create antiviral code to detect it,
+    and after some time period all infected computers will be cured.
+    This article describes another technology of prolonging this time
+    period.
+
+[*] Idea
+
+    We may write code which will change initial virus bytes (or any other
+    virus characteristics) after two months, for example.
+    If the virus will initially contain such modificating-code, antivirus
+    will just contain not one, but two or more checksums, or checksum
+    calculated at other, constant code range.
+
+    There are only one way to prohibit analysis of the modificating-code:
+    to hide it from avers. And there are the following ways to implement
+    this action:
+
+    1. At required time, download code from the Internet, or encrypt code
+       and wait for decryption-key.
+    2. Encrypt code with such method, that decryption will take
+       exactly required time. ("delayed code")
+
+    As you can see, last variant allows us to write completely automated
+    virus with hidden "delayed" features.
+
+[*] Theory (sux)
+
+    Lets encrypt some random buffer A[] with some hashing algorithm so many
+    times N, so it will take us time period T.
+    After these calculations done, we have another random buffer B[] which
+    is used to encrypt/decrypt our "delayed" code.
+
+    There is no way to perform required N iterations using more than one
+    computer ('coz each time current buffer is encrypted), so minimal
+    decryption time is limited with maximal CPU speed.
+
+    If you will use computer which is fast enough, and use some time
+    to encrypt fucking random buffer, then you may be sure that
+    the same operation may not be done in a less time period.
+
+    So, each time the virus is active, it iterates N encryption cycles until
+    buffer A[] will be converted into B[].
+    After time T will be spent to decryption, virus will got buffer B[]
+    and use it to decrypt "delayed code".
+
+[*] Theory (rulez)
+
+    Main trouble is that we dont want to wait for some months to encrypt
+    fucking data, 'coz in example showed above, encryption and decryption
+    both takes the same time period T.
+
+    This means that we will use RSA algorithm.
+    In the RSA algorithm, encryption and decryption keys are different.
+
+    So, to encrypt "delayed code" we will take random buffer A[], encrypt it
+    N times and got buffer B[].
+
+    But, in contrast to previously described hashing algorithm, our virus
+    will iterate not the same operation.
+    Our virus will decrypt buffer B[] back into A[].
+
+    In the encryption operation will be used small (low-bit) exponent,
+    and in the decryption operation we will use big exponent.
+
+    This means that encryption will take much less time than decryption.
+    We will encrypt our "delayed code" for some minutes/hours, but active
+    virus copies (as well as avers ;-) will decrypt it for some months.
+
+[*] Encryption/decryption time interdependence
+
+    Now our task is to answere, how many times should we encrypt our
+    "delayed code" so it will be decrypted for some months.
+
+    As you know, RSA encryption means the following:
+    encryption: encr = (text ^ e) % m
+    decryption: text = (encr ^ d) % m
+    where {e,m} and {d,m} pairs are public and secret keys.
+    ('^' sign means raising to a power, '%' means modulus,
+     remainder after division)
+
+    As a rule, e is a small number (with a low # of bits),
+    such as 3, 17, 50003 and so on.
+    And d is a big number, consisting of 1023 bits for example.
+
+    In our scheme there is no public/secret meaning at all.
+    Here is our scheme:
+
+              Encryption:                         Decryption:
+              ~~~~~~~~~~                          ~~~~~~~~~~
+     (encrypting "delayed code",          (decrypting "delayed code",
+      at home ;-)                          on infected or on avers' PC)
+
+    ■ A[] <-- random buffer/any data     ■ x = B[]
+    ■ encrypt "delayed code" with A[]      N times: x = (x ^ d) % m
+    ■ x = A[]                              A[] = x
+      N times: x = (x ^ e) % m           ■ decrypt "delayed code" with A[]
+      B[] = x
+    ■ store B[] in virus
+
+    Now lets consider our main 'modexp' subroutine.
+
+    // modexp:  subroutine, raising to a power and returning modulus
+    // returns: x = (a ^ e) % m
+
+    void modexp(bignumber& x,   // output
+                bignumber a,    // input
+                bignumber e,    // exponent
+                bignumber m,    // modulus
+    {
+        x = 1;
+        bignumber t = a;
+        for (int i = 0; i <= MaxBit(e); i++)
+        {
+            if (e.GetBit[i] == 1)
+              x = (x * t) % m;        // modmult()
+            t = (t * t) % m;          // modmult()
+        }
+    }
+
+    As you can see, modexp() subroutine calls modmult() subroutine
+    (e.#bit + e.#bit1 - 1) times.
+    (-1 here means that last t*t multiplication is skipped;
+      i just simplified the code showed above)
+    This number of modmult() calls is a main difference between
+    encryption and decryption.
+
+  Decr.time = Encr.time * (D.#bit+D.#bit1 - 1) / (E.#bit1+E.#bit1 - 1) * K
+
+    where:
+
+    #bit  == total number of bits
+    #bit1 == number of 1s
+    #bit + #bit1 - 1 == number of modmult() calls
+
+    K = 0.9+-10% -- Appeared because of variable modmult() time usage.
+                    As it seems, when N-->oo, K-->1
+
+[*] Example
+
+    Lets calculate, how many times (N) should we encrypt the message,
+    so it will be decrypted for 10 minutes.
+    Note, that all these tests were performed on a slow pc, so
+    not the numbers, but their proportionality has a meaning.
+
+    At first, we must create RSA key.
+    Let it be 1024-bit key with low exponent e = 3.
+    Executing: 'KEYGEN.EXE KEY\DPGN 1024 3 3'
+    Key parameters are: 1024-bit N, E==3, D=1023-bit/519*'1'
+
+    Theoretical time ratio: (1023+519-1)/(2+2-1)*0.9 = 462+-10%
+
+    But we want higher ratio precision, so lets find real time ratio,
+    kinda "calibrate" a key.
+
+    Executing: 'DGPGN.EXE e 100'
+    result: 100 iterations done, encryption time = 815 ms
+    Executing: 'DGPGN.EXE d 100'
+    result: 100 iterations done, decryption time = 360228 ms
+
+    'Real' ratio: 360228/815 = 441
+
+    Now we may calculate N for 10-min decryption.
+
+    If 100 decryption iterations used 360228 ms, and N iterations will
+    use 10*60*1000 ms (10 minutes), then
+    N = 60*10*1000 * 100 / 360228 = 167
+
+    If 167 decryption iterations will use 60*10*1000 ms, then
+    encryption time is 60*10*1000 / 441 = 1360 ms.
+
+    So, about one second of encryption will result in 10 mins of decryption.
+
+    Executing: 'DPGN.EXE e 167'
+    encryption time: 1268 ms
+
+    Executing: 'DPGN.EXE d 167'
+    decryption time: 600477 ms = 10 minutes + 0.5 seconds
+
+    Lets show here some other calculation results:
+
+    Decryption:     Encryption:          N (1024-bit key)
+                                     K5-100     Celeron-500
+
+    10 min          1.3 sec              167         950
+    1 hour          7.8 sec             1000         ...
+    1 day             3 min            24000
+    1 week           21 min           168000
+    1 month         1.5 hour          672000
+    1 year           18 hours        8064000
+    16 months         1 day
+    10 years          1 week
+    40 years          1 month
+
+    8-( )
+
+[*] Increasing speed of calculations
+
+    Decryption algorithm 'text = (encr ^ d) % m' may be also represented
+    as follows:
+
+      a = ((encr % p) ^ dp) % p            // dp = d % (p-1)
+      b = ((encr % q) ^ dq) % q            // dq = d % (q-1)
+      if (b < a) b += q
+      text = a + p * (((b - a) * u) % q)       // u: (u * p) % q = 1
+
+    In such algorithm, decryption time should be faster by some times.
+    But, i dont know if it is possible to find p and q knowing d,e and m.
+
+[*] Slowing down speed of calculations
+
+   Because of d is not unique key, and d variants may be calculated
+   using formula:
+
+   d' = d + (p-1)*(q-1) * t, где t=0,1,2,...,
+
+   then d length may be increased as we want,
+   that will slow down calculations by many times.
+
+   But, if p and q will be found (knowing d'), then original d can
+   also be found, and then somebody will be able to perform
+   DPGN calculations many times faster, that is bad.
+
+[*] Other bad stuff
+
+    1. In a real life, there is no need to publish N number
+       (# of iterations), just any good CRC will be enough.
+       So, nobody will know what is IT and when IT will be decrypted and
+       executed. |->
+       Also, it is good to add some random part to N number and do not
+       make resulting time T day- or hour- aligned.
+
+    2. I'm not sure, but - maybe - {N times: x = (x ^ d) % m} operation
+       may be changed to something more fast (using some perverted math).
+       To avoid such shit, you may do some additional encryption between
+       'modexp' calls, for example as following:
+         N times:
+         {
+           x = (x ^ d) % m;
+           x = x xor <some-big-number>;
+         }
+       DPGN.EXE just xors some dwords within the x number on each iteration.
+
+[*] "Delayed code" usage (which code to encrypt?)
+
+    ■ As was said above, entrypoint-modificating code, i.e. virus checksum
+      changer. Imagine: your virus has been spreaded, av has been written,
+      and now 99% of infected PCs are cured. But, that 1% that remains
+      infected, after some time, changes own checksum and new virus begins
+      to spread starting not from one-two PCs (as it was with "host"
+      modification), but from thousands of infected computers.
+
+    ■ We all are thinking about downloading viral plugins from the Internet.
+      "Delayed code" technology allows your virus to contain any fixed urls,
+      those will be hidden from avers, until right time.
+
+    ■ Instead of deleting user's data you can quickly encrypt it, leaving
+      a chance to decryption... in some years ;-)
+
+    ■ Recursive encryption. I mean that decrypted "delayed code" can
+      contain another "surprise package".
+
+                                                            (x) 2000 Z0MBiE
+                                   * * *

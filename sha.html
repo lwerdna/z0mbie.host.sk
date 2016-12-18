@@ -1,0 +1,74 @@
+<html>
+<head>
+<title>КАСПЕРСКИЙ ОПЯТЬ УКРАЛ ЧУЖОЙ КОД</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#0000FF vlink=#0000C0 alink=#FFFF00>
+
+<font face=Verdana>
+<h2 align=center><i>E. KASPERSKIJ (AVP) STEALS CODE AGAIN</i></h2>
+</font>
+
+<table width=100% border=0 cellspasing=0 cellpadding=0>
+
+<tr><th align=left valign=top>  stealed from:       <th align=left>NIST Secure Hash Algorithm, SHA<br>i found it in PGP 5.0i sources, PGPsha.c/.h
+<tr><th align=left>  original sources:   <th align=left><a href="shaorig.zip">shaorig.zip</a> ~6k
+<tr><th align=left>  stealed subprograms:<th align=left>SHAInit, SHABuffer, SHAFinal, SHATransform, etc.
+<tr><th align=left>  disassembly of avp: <th align=left><a href="shadiza.zip">shadiza.zip</a> ~3k
+<tr><th align=left> stealed code is here:<th align=left> _avp32.exe  size=368704  v3.0.128  va=0x40FE8A+
+<tr><th align=left> &nbsp;               <th align=left> _avp32.exe  size=213056  v3.0.129  va=0x41008A+
+
+</table>
+
+<h3 align=center>Comments</h3>
+
+<p>
+После очередного троянского дополнения обстреманый каспер решил таки
+к своему отстою добавить кривую подпись. И даже распиздился всем, что де
+<i>лицензировал</i> (по-русски, навеное, отсосал) ее там, у кого-то. У ланкрипты (LanKripto) наверное. И вот результат.
+То ли каспер пиздит, что подпись куплена, то ли ланкрипта наебала каспа и
+продала ему полное гавно.
+</p>
+
+<p>
+Как вам наверное известно, каспер, сначала обещавший сменить формат баз, из-за
+лености своей просто навесил на них контрольную сумму.<br>
+Пытаясь в очередной раз сделать вам всем подарок - еще одно троянское дополнение,
+я выяснил следующее:<br>
+1) от файла считается 20-байтовый хэш<br>
+2) от хэша считается некоторая функция, которая затем оверлеем записывается в задницу файлу.
+Типа <small>13,10,';&nbsp;0XLSznpdI71fB300e7Uwj1DPr8uAEV6YKjE8+IKy4VCYDt3lzRTLi27dWP',0ADh,0ADh</small><br>
+Возможно, что эта функция как-то и связана с некоторым алгоритмом с закрытым-открытыми ключами,
+хотя касперу верить нельзя и наверняка это все очередная наябка с XORом.
+<br>
+В связи с нехваткой времени и желания копаться с собственно подписью, я взялся за хэш,
+в результате чего были выяснены прелюбопытнейшие детали:<br>
+Хэш (NIST Secure Hash Algorithm, SHA) каспером попросту украден.<br>
+В одном из оригинальных исходников хэша (pgpsha.h) записано так:<br>
+<code>
+* This is a PRIVATE header file, for use only within the PGP Library.<br>
+* You should not be using these functions in an application.<br>
+</code>
+Оригинальные исходники лежат здесь: <a href="shaorig.zip">shaorig.zip</a>,<br>
+а дисассемблированные куски кода из авп здесь: <a href="shadiza.zip">shadiza.zip</a><br>
+Сравнивайте, изучайте, рассказываете об этом всем, кого знаете.<br>
+</p>
+
+<p>
+Таким образом, чтобы сделать троянское дополнение к авп, достаточно лишь хакнуть хэш,
+научившись так изменть файл, чтобы получать требуемые 20 байт, вычисляемые по известному алгоритму.
+</p>
+
+<p>
+В настоящее время коллективом программистов ведутся исследования как в области взлома хэша,
+так и в области взлома якобы ланкриптовской подписи, так что результаты не заставят себя ждать.<br>
+Трепещите, ламеры, ибо скоро настанет вам пиздец!
+</p>
+
+<address>
+Перепечатка этого материала возможна только полностью и с указанием источника:<br>
+(c) 06 June 1999, Z0MBiE, <a href="http://z0mbie.host.sk">http://z0mbie.host.sk</a>
+</address>
+
+</body>
+</html>

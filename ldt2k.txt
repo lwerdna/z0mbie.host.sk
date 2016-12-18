@@ -1,0 +1,176 @@
+
+                        ADDING LDT ENTRIES IN WIN2K
+                        ---------------------------
+
+     I  was  surprised when found that win2k allows programs to add own LDT
+ entries.  When  first  entry is added, LDT for current process is created,
+ with minimal possible size to contain this entry. I.e. if you will add one
+ descriptor  at  LDT  offset  16  (selector  0F), total LDT size will be 24
+ bytes, and previuous unused entries will be empty.
+
+     So,  there is (at least) 3 methods to add own LDT entries. All of them
+ are  called  in  ring3,  but  real  action is performed in the ntoskrnl in
+ ring0.  The  only  problem  is that this ring0 code validates descriptors,
+ allowing only the following conditions:
+
+     - base < 7FFF0000, limit < 7FFF0000, base+limit <= 7FFF0000
+     - Code/Data 16/32-bit descriptors
+     - DPL=3
+
+        descriptor  size,  possible         possible
+         bitfield   bits    values       (*) value   type
+
+        Base         32   0..7FFEFFFF        16,17  Data RO
+        Limit        20   0..7FFEFFFF        18,19  Data RW
+        Granularity   1       0,1            20,21  Data RO ED
+        Default_Big   1       0,1            22,23  Data RW ED
+        Reserved_0    1       0,1            24,25  Code EO
+        Sys           1       0,1            26,27  Code RE
+        Pres          1       0,1
+        Dpl           2        3
+        Type          5       (*)
+
+     But, there is a little difference: first method of setting LDT entries
+ uses  one  descryptor-verifying  subroutine,  but second and third methods
+ uses  another  one;  this  results  in  different restrictions to Pres bit
+ (presence  of  the  descriptor), and, using 1st method, with this bit set,
+ you can put into LDT less restricted descriptors.
+
+     And  here  is the idea, which made me writing this text. When you call
+ some  system  INT,  some  ring0  handlers doesnt change DS/ES selectors to
+ 0x23 (std NT r0 dataseg). They assume that default DS selector has Base=0.
+ Other  handlers  assume  CS = 0x1B (std NT r3 codeseg), and, if it is not,
+ works  in  some  different  way.  This all may probably result in entering
+ ring0,  but  i  didnt found how to do it, since system handlers works with
+ memory  >  2G,  and  descriptor  bases/limits are limited to be < 2G. But,
+ anyway, maybe you will invent something.
+
+                          READING GDT DESCRIPTORS
+
+     This  is trivial, and win32 api allows it. Reading GDT descriptors can
+ be  used, for example, to find out FS base in the different contexts, when
+ debugging processes and exception is occured.
+
+  BOOL KERNEL32.GetThreadSelectorEntry( HANDLE hThread,
+                                        DWORD dwSelector,
+                                        LPLDT_ENTRY lpSelectorEntry );
+
+     This  function  will  just  calls  NTDLL.NtQueryInformationThread with
+ infoclass 12.
+
+                          READING LDT DESCRIPTORS
+
+  extern "C" // NTDLL.DLL
+  int WINAPI NtQueryInformationProcess(HANDLE,DWORD,VOID*,DWORD,DWORD*);
+
+  int MyGetLDTSelectorEntry1(HANDLE hProcess,
+                             DWORD dwSelector,
+                             LPLDT_ENTRY lpSelectorEntry)
+  {
+    DWORD buf[4];
+    DWORD len;
+    buf[0] = dwSelector & 0xFFFFFFF8;  // selector --> offset
+    buf[1] = 8;                    // size (multiple selectors may be added)
+    int res = NtQueryInformationProcess(hProcess,10,buf,16,&len);
+    memcpy(lpSelectorEntry, &buf[2], 8);
+    return res;
+  }
+
+     Return  values  is of type NTSTATUS, which is 0 if OK, and Cxxxxxxx if
+ error,  for  example  C000011A  is  error  for  invalid  descriptor. 10 is
+ ProcessLdtInformation information class.
+
+                          WRITING LDT DESCRIPTORS
+
+                                  Method 1
+
+     This is the best method, as i think.
+
+  extern "C" // NTDLL.DLL
+  int WINAPI NtSetInformationProcess  (HANDLE,DWORD,VOID*,DWORD);
+
+  int MySetLDTSelectorEntry1(HANDLE hProcess,
+                             DWORD dwSelector,
+                             LPLDT_ENTRY lpSelectorEntry)
+  {
+    DWORD buf[4];
+    buf[0] = dwSelector & 0xFFFFFFF8;  // selector --> offset
+    buf[1] = 8;                        // size (multiple selectors may be added)
+    memcpy(&buf[2], lpSelectorEntry, 8);
+    return NtSetInformationProcess(hProcess,10,buf,16);
+  }
+
+                                    Method 2
+
+  extern "C" // NTDLL.DLL
+  int WINAPI NtSetLdtEntries(DWORD, DWORD, DWORD, DWORD, DWORD, DWORD);
+
+  int MySetLDTSelectorEntry2(DWORD dwSelector,
+                             LPLDT_ENTRY lpSelectorEntry)
+  {
+    return NtSetLdtEntries(dwSelector,
+                           *(DWORD*)lpSelectorEntry,
+                           *(((DWORD*)lpSelectorEntry)+1),
+                           0,0,0);
+  }
+
+                                    Method 3
+
+     This  method  is  illustration of the idea i talked before: when CS is
+ 0x1B,  it  doesnt  works.  When  CS  is  changed  to something else (using
+ previuos methods :-), it will work fine.
+
+  int MySetLDTSelectorEntry3(DWORD dwSelector,
+                             LPLDT_ENTRY lpSelectorEntry)
+  {
+    if (_CS == 0x1B) return 0xC0000000;
+    asm
+    {
+      push    ebp
+      push    ebx
+      mov     ebx, dwSelector     // EBX = offset in LDT
+      and     bl, 0F8h
+      mov     edx, lpSelectorEntry
+      mov     ecx, [edx+0]        // ECX = descriptor.dword ptr 0
+      mov     edx, [edx+4]        // EDX = descriptor.dword ptr 4
+      mov     eax, 0F0F0F0F1h     // EAX = F0F0F0F1
+      mov     ebp, eax            // EBP = EAX
+      int     2Ah
+      pop     ebx
+      pop     ebp
+    }
+    return _EAX;
+  }
+
+                               USAGE EXAMPLE
+
+  LDT_ENTRY l1;
+  DWORD base  = 0x00000000;
+  DWORD limit = 0x7FFEFFFF;
+  l1.BaseLow                   = base & 0xFFFF;
+  l1.HighWord.Bytes.BaseMid    = base >> 16;
+  l1.HighWord.Bytes.BaseHi     = base >> 24;
+  l1.LimitLow                  = (limit >> 12) & 0xFFFF;
+  l1.HighWord.Bits.LimitHi     = limit >> 28;
+  l1.HighWord.Bits.Granularity = 1;    // 0/1, if 1, limit=(limit<<12)|FFF
+  l1.HighWord.Bits.Default_Big = 1;    // 0=16bit  1=32bit
+  l1.HighWord.Bits.Reserved_0  = 0;    // 0/1
+  l1.HighWord.Bits.Sys         = 0;    // 0/1
+  l1.HighWord.Bits.Pres        = 1;    // 0/1 (presence bit)
+  l1.HighWord.Bits.Dpl         = 3;    // only 3 allowed :-(
+  l1.HighWord.Bits.Type        = 27;   // [16..27]
+
+  MySetLDTSelectorEntry1((HANDLE)-1, 0x0F, &l1);
+
+  MyGetLDTSelectorEntry1((HANDLE)-1, 8, &l1);
+
+  MySetLDTSelectorEntry2(0x17, &l1);
+
+  _CS = 0x0F;
+  MySetLDTSelectorEntry3(0x1F, &l1);
+  _CS = 0x1B;
+
+                                   * * *
+
+                      (x) 2002 http://z0mbie.host.sk/
+       

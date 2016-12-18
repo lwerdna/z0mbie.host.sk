@@ -1,0 +1,90 @@
+
+                       SOME IDEAS ABOUT METAMORPHISM
+
+     Not  long  ago  appeared an idea about virus, consisting of only NOPs.
+ Let  we have such typical program, that its code (in different places, but
+ consecutively)  contains  the same instructions, blocks of instructions or
+ their  functional variants, those can be used in some virus. Then, it will
+ be  enough to fill all other part of that program's code with NOPs, so all
+ remaining   instructions   will   become  the  virus  itself.  Thus,  from
+ viewpoint  of  performed  midifications,  virus will consist of only NOPs.
+ This  can  be  not only the simple program, but program with all its DLLs;
+ moreover, we can insert not only NOPs, but lots of other garbage. In other
+ words,  standard  infection  by  means  of  adding  new  instructions here
+ changed  into inverse operation, that removes unnecessary instructions. Of
+ course, there will be troubls with constants; but if you're interested in,
+ you will invent something.
+     Much  more  interesting  consequences  can  be  made  from analysis of
+ technics, that such virus may use.
+     Really,  viruses  and  all other programs, are all consisting of small
+ blocks  of  code,  i.e.  elements, of some instructions each one. And such
+ elements  are  used  many times both in programs and viruses, and, what is
+ most important, in different variants.
+     Now, lets imagine, that our virus contains hash value for each variant
+ of  such  element,  instead  of keeping the code itself. And virus all the
+ time  searches for  possible variants of each element within code of found
+ programs,  by means of checking hash values for each found instruction(s);
+ and  attachs  these  found  elements  to own code, as such, replacing last
+ found variant.
+     In  other  words,  all  the  virus  consists  of  small blocks of code
+ (elements), and, for example, variants of some element looks as follows:
+
+   variant 1       variant 2       variant 3       variant 4     variant N
+
+ mov eax, [ecx]  mov edx, [ecx]  mov eax, ecx    push [ecx]       ...
+ mov edx, eax    mov eax, edx    mov edx, [eax]  mov edx, [esp]   ...
+                                 mov eax, edx    pop eax
+
+     Thus,  for  each  single  element,  virus  will  contain N hashs for N
+ variants of this element. And, probably, last found variant.
+     As a result, there appears uncertainty in modifications of such virus,
+ because it is unknown, of which set of instructions it can consist.
+     And  the more variants (and, as such, hash values) for each element we
+ have  and  the  more  size  of  the  hash  is  and  the  more time of hash
+ calculation  is  ,  the  harder  is  to  get all the information about all
+ possible modifications of the virus.
+     As such, "definition", i.e. obtaining information about all the states
+ of this virus, is highly distributed in time.
+     And,  even  more. It is unnecessary, that virus will initially contain
+ _all_  the  elements. Some subprograms can be absent (i.e. only hashs will
+ be present), and executed only when complete set of the elements is found.
+ As  such, nobody will know what these subroutines are, and where they will
+ be  executed.  Similar idea was said some time ago, when it was offered to
+ encrypt part of the virus with some unique bios data.
+     Another  feature.  Some  of  the  elements are "normal", and other are
+ "garbage".  And,  there are lots of possibilities in the field of addition
+ garbage elements by taking them from other programs.
+     Where  hashs  will  be  stored? They can be encrypted within virus; if
+ hash  database  is  big  enough,  it  can  be distributed between infected
+ machines  all  over  the  internet; and these hashs can be attached in the
+ same  way  as  viral  plugins.  But what it means, when possibility of new
+ variants of elements is attached? This means, that some infected file will
+ gain  possibility  to  be missed while detection, and, after some time, to
+ startup new epidemy.
+     How  to split virus into elements? If it is written in asm, then, as i
+ think,  manually;  if  HLL  is  used,  maybe automatically. For example to
+ compile from c++ to asm, and then to use some parser.
+     About  elements.  They  must  consist  of  some  small  number  of asm
+ instructions,   because   there   are  a  lot  of  combinations  of  these
+ instructions:  at  least  half  of the summary size of all the programs is
+ code.  Variable length of typical element is not limited. But there exists
+ a  little  note. To achive good morphing possibilities, virus must contain
+ two types of variants of elements: first are commonly used, to allow virus
+ change  its body quickly enough; for example - variants 1,2,3 shown above;
+ second type is rarely used elements, such as variant 4, to make finding of
+ them hard, but possible.
+     Also,  instead  of searching for elements within existing files, it is
+ possible to try to find'em by means of iterating generation of some random
+ bytes.
+
+     Of course, to write a virus consisting of only such elements is a hard
+ task.  But,  lets  remember,  metamorphic viruses are the same polymorphic
+ ones,  where  poly  decryptor growed and became the whole virus body, that
+ generates  itself.  In other words, tomorrow it will be done, but today we
+ alredy   can  use  idea  about  elements  in  the  generating  polymorphic
+ decryptors.  I  think,  that  it  should be combined with code integration
+ technics.  Thus, in the middle of the code section of the infected program
+ there  will  exist  polymorphic  decryptor that will be able to consist of
+ elements, those finding requires lots of time.
+
+                                   * * *

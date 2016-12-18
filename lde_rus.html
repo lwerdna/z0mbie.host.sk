@@ -1,0 +1,70 @@
+<html>
+<head>
+<title>LDE32 -- Length Disassembler Engine -- User's Manual</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B4C4B4 text=#000000 link=#0000EE vlink=#551A8B
+background="bkgr.gif">
+
+<h1 align=center>LDE32 -- Length-Disassembler Engine</h1>
+
+<h2 align=center>User's Manual</h2>
+
+<hr><br>
+<p align=center>[Русский] [<a href="lde_eng.html">English</a>]</p>
+<hr><br>
+
+<p>LDE32 -- это библиотека для определения длин x86 инструкций.</p>
+
+<p>В LDE32 всего две процедуры.</p>
+
+<p>1. <code><font color=#000055>void pascal disasm_init(void* tableptr);</font></code></p>
+
+<p>- используется для распаковки в память 2-килобайтной таблицы,
+которая потребуется второй процедуре при дисассемблировании.</p>
+
+<p>2. <code><font color=#000055>int pascal disasm_main(void* opcodeptr, void* tableptr);</font></code></p>
+
+<p>Эта функция используется для дисассемблирования одной инструкции.
+Возвращает длину инструкции в байтах, либо -1 в случае ошибки.</p>
+
+<p>Процедуры сохраняют регистры неизмененными; код независим к смещению;
+не используются никакие внешние данные.</p>
+
+<p>Для подключения LDE32 добавьте следующую строку:</p>
+
+<p><code><font color=#000055>include lde32bin.inc</font></code></p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>пример
+<tr>
+<td>
+<pre><font color=#000055>
+                push    offset tbl      ; <i>распаковать в память таблицу</i>
+                call    disasm_init
+
+                mov     ebx, 401000h
+cycle:
+                push    ebx             ; <i>оффсет инструкции</i>
+                push    offset tbl      ; <i>адрес таблицы</i>
+                call    disasm_main
+
+                add     ebx, eax
+
+                cmp     eax, -1         ; <i>ошибка?</i>
+                jne     cycle
+
+include         lde32bin.inc            ; <i>код LDE32</i>
+
+tbl             db      2048 dup (?)    ; <i>таблица флагов LDE32</i>
+</font></pre>
+</table>
+
+<br>
+<hr><br>
+
+<p align=center>programmed in 1999 by Z0MBiE, <a href="http://z0mbie.host.sk">http://z0mbie.host.sk</a></p>
+
+</body>
+</html>

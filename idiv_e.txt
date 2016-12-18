@@ -1,0 +1,514 @@
+
+                  I.Danilov vs V.Bogdanov (Dr.Web vs AVP):
+                          Programmer's Competition
+
+                            xlated from russian
+
+     This  is  a  global  research  of  comparing IQ of two av programmers.
+ Danilov and Bogdanov will be fixed on the october's base and version 4.20,
+ after  that  we will send IDIV command to their input and analyze reaction
+ in the form of the av emulator.
+     Now, the problem description.
+     There  are  two  instructions:  DIV  and IDIV, performing unsigned and
+ signed  division. And there are three forms of each instruction, depending
+ on the size of the divisor: BYTE, WORD or DWORD. Dividend, whose precision
+ is  twice  larger,  is  represented  in  the fixed registers: AX, DX:AX or
+ EDX:EAX.  Quotient  and  remainder are returned in AL:AH, AX:DX or EAX:EDX
+ registers.  Because  precision  of  the  dividend  is  twice  larger  than
+ quoitient's  one,  there  are  several situations, when produced result is
+ larger  than  output  register,  so  result cant be returned, and then CPU
+ generates  overflow  exception  (EXCEPTION_INT_OVERFLOW).  Also,  there is
+ division-by-zero  exception  (EXCEPTION_INT_DIVIDE_BY_ZERO),  but,  it  is
+ simple enough to speak about.
+     It  is clear, that program emulating DIV and IDIV commands by means of
+ direct  execution,  must  avoid  exception  in  the  own code, by means of
+ input registers checking.
+     This checking is a subject of the following disasm.
+
+=============================================================================
+ Danilov's emulator: drweb32.dll
+=============================================================================
+
+emul_flags      = ebp
+
+--------------------------------------------------------------------web/div8-
+
+emul_div8:      mov     ecx, edx        ; cl = divisor
+                and     ecx, 0FFh
+                ;;
+                mov     eax, emul_eax   ; load emul regs
+                and     eax, 0FFFFh     ; AX = dividend
+                ;;
+                or      ecx, ecx        ; div by 0 ?
+                jz      emul_div0
+                cmp     ah, cl          ; dividend.Hi >= divisor
+                jae     emul_div0
+                ;;
+                xor     edx, edx        ; prepare to division
+                ;;
+                push    emul_flags      ; division emulation
+                popf
+                div     cx
+                pushf
+                pop     emul_flags
+                ;;
+                cmp     eax, 0FFh       ; overflow check
+                ja      emul_div0
+                ;;
+                mov     emul_al, al     ; save emul regs
+                mov     emul_ah, dl
+                ;;
+                jmp     emul_complete
+
+-------------------------------------------------------------------web/div16-
+
+emul_div16:     mov     ecx, edx        ; cx <- divisor
+                and     ecx, 0FFFFh
+                ;;
+                mov     eax, emul_eax   ; load emul regs
+                and     eax, 0FFFFh     ; DX:AX = dividend
+                mov     edx, emul_edx
+                and     edx, 0FFFFh
+                ;;
+                or      ecx, ecx        ; div by 0 ?
+                jz      emul_div0
+                cmp     edx, ecx        ; dividend.Hi >= divisor
+                jae     emul_div0
+                ;;
+                shl     edx, 10h        ; prepare to division
+                mov     dx, ax          ; EDX:EAX <-- dx:ax
+                mov     eax, edx
+                xor     edx, edx
+                ;;
+                push    emul_flags      ; division emulation
+                popf
+                div     ecx
+                pushf
+                pop     emul_flags
+                ;;
+                cmp     eax, 0FFFFh     ; overflow check
+                ja      emul_div0
+                ;;
+                mov     emul_ax, ax     ; save emul regs
+                mov     emul_dx, dx
+                ;;
+                jmp     emul_complete
+
+-------------------------------------------------------------------web/div32-
+
+emul_div32:     mov     ecx, edx        ; ecx <- divisor
+                ;;
+                mov     eax, emul_eax   ; load emul regs
+                mov     edx, emul_edx   ; EDX:EAX = dividend
+                ;;
+                or      edx, edx        ; a bug
+                jz      emul_complete   ;
+                ;
+                or      ecx, ecx        ; div by 0 ?
+                jz      emul_div0
+                cmp     edx, ecx        ; dividend.Hi >= divisor
+                jae     emul_div0
+                ;;
+                push    emul_flags      ; division emulation
+                popf
+                div     ecx
+                pushf
+                pop     emul_flags
+                ;;
+                mov     emul_eax, eax   ; save emul regs
+                mov     emul_edx, edx
+                ;;
+                jmp     emul_complete
+
+-------------------------------------------------------------------web/idiv8-
+
+emul_idiv8:     movsx   ecx, dl         ; cl = dl = divisor
+                ;;
+                mov     ax, emul_ax     ; load emul regs
+                ;;                      ; AX = dividend
+                or      ecx, ecx        ; div by 0 ?
+                jz      emul_div0
+                ;;
+                test    dl, 80h         ; abs(dl)
+                jz      @@1
+                neg     dl
+@@1:            ;;
+                test    ah, 80h         ; abs(ah)
+                jz      @@2             ; AH = dividend.Hi
+                neg     ah
+@@2:            ;;
+                sub     dl, ah          ; dl <= ah * 2
+                jb      emul_div0
+                cmp     dl, ah
+                jbe     emul_div0
+                ;;
+                sub     dl, ah          ; dl - ah * 2 != 1
+                cmp     dl, 1
+                jnz     @@3
+                test    al, 80h         ; dividend, high bit set?
+                jnz     emul_div0
+@@3:            ;;
+                mov     ax, emul_ax     ; prepare to division
+                cwd                     ; DX:AX <-- AX
+                ;;
+                push    emul_flags      ; division emulation
+                popf
+                idiv    cx
+                pushf
+                pop     emul_flags
+                ;;
+                cmp     ax, 7Fh         ; overflow check
+                ja      emul_div0
+                ;;
+                mov     emul_al, al     ; save emul regs
+                mov     emul_ah, dl
+                ;;
+                jmp     emul_complete
+
+------------------------------------------------------------------web/idiv16-
+
+emul_idiv16:    movsx   ecx, dx         ; ecx = dx = divisor
+                ;;
+                mov     ax, emul_dx     ; ax = dividend.Hi
+                ;;
+                or      ecx, ecx        ; div by 0 ?
+                jz      emul_div0
+                ;;
+                test    dh, 80h         ; abs(dx)
+                jz      @@1
+                neg     dx
+@@1:            ;;
+                test    ah, 80h         ; abs(ax)
+                jz      @@2
+                neg     ax
+@@2:            ;;
+                sub     dx, ax          ; if (dx <= ax * 2) div0
+                jb      emul_div0
+                cmp     dx, ax
+                jbe     emul_div0
+                ;;
+                sub     dx, ax          ; if (dx - ax * 2) != 1 { ...
+                cmp     dx, 1
+                jnz     @@3
+                test    emul_ah, 80h    ; dividend.Lo, high bit set?
+                jnz     emul_div0       ;
+@@3:            ;;
+                mov     eax, emul_eax   ; load emul regs
+                and     eax, 0FFFFh
+                mov     edx, emul_edx
+                and     edx, 0FFFFh
+                ;;
+                or      ecx, ecx        ; div by 0 ?
+                jz      emul_div0       ; 2nd checking, for more reliability
+                ;;
+                shl     edx, 10h        ; prepare to division
+                mov     dx, ax          ; EDX:EAX <-- dx:ax
+                mov     eax, edx
+                cdq
+                ;;
+                push    emul_flags      ; division emulation
+                popf
+                idiv    ecx
+                pushf
+                pop     emul_flags
+                ;;
+                cmp     eax, 7FFFh      ; overflow check
+                ja      emul_div0
+                ;;
+                mov     emul_ax, ax     ; save emul regs
+                mov     emul_dx, dx
+                ;;
+                jmp     emul_complete
+
+------------------------------------------------------------------web/idiv32-
+
+emul_idiv32:    mov     emul_eax, 0     ; this is cool
+                mov     emul_edx, 0
+                ;;
+                jmp     emul_complete
+
+-----------------------------------------------------------------------------
+
+=============================================================================
+ Bogdanov's emulator: kernel.avc/emul.obj
+=============================================================================
+
+divisor         =       ebx
+
+--------------------------------------------------------------------avp/div8-
+
+emul_div8:      cmp     byte ptr [divisor], 0   ; div by 0 ?
+                jz      emul_int0
+                ;;
+                mov     ax, emul_ax     ; load emul regs
+                ;;                      ; AX = dividend
+                cmp     ah, [divisor]   ; dividend.Hi >= divisor
+                jae     try_emul_int0
+                ;;
+                push    emul_flags      ; division emulation
+                popfw
+                div     byte ptr [divisor]
+                pushfw
+                pop     emul_flags
+                ;;
+                mov     emul_ax, ax     ; save emul regs
+                ;;
+                jmp     emul_complete
+
+-------------------------------------------------------------------avp/div16-
+
+emul_div16:     cmp     word ptr [divisor], 0   ; div by 0 ?
+                jz      emul_int0
+                ;;
+                mov     ax, emul_ax     ; load emul regs
+                mov     dx, emul_dx     ; DX:AX = dividend
+                ;;
+                cmp     dx, [divisor]   ; dividend.Hi >= divisor
+                jae     try_emul_int0
+                ;;
+                push    emul_flags      ; division emulation
+                popfw
+                div     word ptr [divisor]
+                pushfw
+                pop     emul_flags
+                ;;
+                mov     emul_ax, ax     ; save emul regs
+                mov     emul_dx, dx
+                ;;
+                jmp     emul_complete
+
+-------------------------------------------------------------------avp/div32-
+
+emul_div32:     cmp     dword ptr [divisor], 0  ; div by 0 ?
+                jz      emul_int0
+                ;;
+                mov     eax, emul_eax   ; load emul regs
+                mov     edx, emul_edx   ; EDX:EAX = dividend
+                ;;
+                cmp     edx, [divisor]  ; dividend.Hi >= divisor
+                jae     try_emul_int0
+                ;;
+                push    emul_flags      ; division emulation
+                popfw
+                div     dword ptr [divisor]
+                pushfw
+                pop     emul_flags
+                ;;
+                mov     emul_eax, eax   ; save emul regs
+                mov     emul_edx, edx
+                ;;
+                jmp     emul_complete
+
+-------------------------------------------------------------------avp/idiv8-
+
+emul_idiv8:     cmp     byte ptr [divisor], 0   ; div by 0 ?
+                jz      emul_int0
+                ;;
+                mov     ax, emul_ax     ; load emul regs
+                ;;                      ; AX = dividend
+                cmp     ax, 80h         ; dividend >= 80h
+                jae     emul_complete
+                ;;
+                push    emul_flags      ; division emulation
+                popfw
+                idiv    byte ptr [divisor]
+                pushfw
+                pop     emul_flags
+                ;;
+                mov     emul_ax, ax     ; save emul regs
+                ;;
+                jmp     emul_complete
+
+------------------------------------------------------------------avp/idiv16-
+
+emul_idiv16:    cmp     word ptr [divisor], 0   ; div by 0 ?
+                jz      emul_int0
+                ;;
+                mov     ax, emul_ax     ; load emul regs
+                mov     dx, emul_dx     ; DX:AX = dividend
+                ;;
+                cmp     dx, 0           ; dividend.Hi = 0
+                jnz     emul_complete
+                cmp     ax, 8000h       ; dividend.Lo >= 8000h
+                jae     emul_complete
+                ;;
+                push    emul_flags      ; division emulation
+                popfw
+                idiv    word ptr [divisor]
+                pushfw
+                pop     emul_flags
+                ;;
+                mov     emul_ax, ax     ; save emul regs
+                mov     emul_dx, dx
+                ;;
+                jmp     emul_complete
+
+------------------------------------------------------------------avp/idiv32-
+
+emul_idiv32:    cmp     dword ptr [divisor], 0  ; div by 0 ?
+                jz      emul_int0
+                ;;
+                mov     eax, emul_eax   ; load emul regs
+                mov     edx, emul_edx   ; EDX:EAX = dividend
+                ;;
+                cmp     edx, 0          ; dividend.Hi = 0
+                jnz     emul_complete
+                cmp     eax, 80000000h  ; dividend.Lo >= 2^31
+                jae     emul_complete
+                ;;
+                push    emul_flags      ; division emulation
+                popfw
+                idiv    dword ptr [divisor]
+                pushfw
+                pop     emul_flags
+                ;;
+                mov     emul_eax, eax   ; save emul regs
+                mov     emul_edx, edx
+                ;;
+                jmp     emul_complete
+
+-----------------------------------------------------------------------------
+
+     Now, some comments.
+
+     From  the  12  subroutines alogorithmically-correct register-check has
+ only 5 ones. All subroutines has correct or even redundand error-checking,
+ so there is no way to fuckup 'em.
+
+     Most of register combinations will be emulated incorrectly.
+
+  1. subroutines: div8 and div16
+
+  bogdanov: correct algorithm, minimal size of code
+
+  danilov:  algorithm is correct, but bogdanov has better one;
+            code sucks.
+            redundand overflow checking.
+
+  2. subroutine: div32
+
+  bogdanov: correct algorithm, minimal size of code
+
+  danilov:  incorrect algorithm, 'coz of bug;
+            redundand erroneous zero-dividend checking.
+
+  3. subroutine: idiv8
+
+  bogdanov: incorrect algorithm -
+            only 128 numbers (from 65536) will be divided.
+            absent overflow-checking.
+
+  danilov:  incorrect algorithm, but a bit better than bogdanov's one;
+
+            for example, AX=C0FF and CL=81 is IDIV-ided correctly,
+            but emulator will begin INT 0 emulation
+
+  4. subroutine: idiv16
+
+  bogdanov: incorrect algorithm -
+            only 32768 numbers (from 2^32) will be divided;
+            absent overflow-checking.
+
+  danilov:  too many code;
+            incorrect algorithm,
+            but a bit better than bogdanov's one
+
+            for example, DX=C000, AX=FFFF, CX=8001 are IDIV-ided ok,
+            but drweb emulates INT 0
+
+  5. subroutine: idiv32
+
+  bogdanov: incorrect algorithm,
+            only 80000000h numbers (from 2^64) will be divided;
+            absent overflow-checking.
+
+  danilov:  completely absent
+
+-----------------------------------------------------------------------------
+
+     Competition results.
+
+     Nobody emulated IDIV correctly.
+
+            subroutines:  total  programmed    correct    incorrect
+  bogdanov                  6         6           3           3
+  danilov                   6         5           2           3
+
+     But, danilov gives as a hope, that sometimes... sometimes he will write
+ correct emulator. As it seems, his code was modifed several times, he even
+ tried to do such things as overflow checking and zero-dividend checking.
+ Also, register checking before IDIV are looking as stealed from somewhere,
+ but with errors.
+     From the other side, bigdanov's emulator works only with 1% of possible
+ number combinations, so it has no overflow checking.
+
+     So, DANILOV wins!
+
+-----------------------------------------------------------------------------
+
+  And here is some bonus:
+
+-----------------------------------------------------------------------------
+
+  subroutine: IDIV emulation, returns CF=1 instead of INT 0.
+
+ ; input:  EDX:EAX = dividend
+ ;         ECX = divisor
+ ; output: CF = 0 -- all ok, EAX = quotient, EDX = remainder
+ ;         CF = 1 -- error (div0 or overflow)
+
+emul_idiv:              pusha
+                        xor     bh, bh
+                        or      ecx, ecx
+                        jz      __div_err
+                        jg      __g1
+                        neg     ecx
+                        or      bh, 1
+__g1:                   or      edx, edx
+                        jge     __g2
+                        neg     edx
+                        neg     eax
+                        sbb     edx, 0
+                        xor     bh, 3
+__g2:                   xor     esi, esi        ; d
+                        xor     edi, edi        ; m
+                        mov     bl, 64
+__divcycle:             shl     esi, 1          ; d <<= 1
+                        jc      __div_err
+                        shl     eax, 1          ; x <<= 1
+                        rcl     edx, 1
+                        rcl     edi, 1          ; m = (m << 1) | x.bit[i]
+                        jc      __cmpsub
+                        cmp     edi, ecx
+                        jb      __cmpsubok
+__cmpsub:               sbb     edi, ecx
+                        or      esi, 1
+__cmpsubok:             dec     bl
+                        jnz     __divcycle
+                        or      esi, esi
+                        js      __div_err
+                        or      edi, edi
+                        js      __div_err
+                        test    bh, 1
+                        jz      __skipneg1
+                        neg     esi
+__skipneg1:             test    bh, 2
+                        jz      __skipneg2
+                        neg     edi
+__skipneg2:             mov     [esp+7*4], esi
+                        mov     [esp+5*4], edi
+                        popa
+                        clc
+                        retn
+__div_err:              popa
+                        stc
+                        retn
+
+-----------------------------------------------------------------------------
+
+ That's all!
+
+                                                            (x) 2000 Z0MBiE
+                                                      http://z0mbie.host.sk
+
+-----------------------------------------------------------------------------

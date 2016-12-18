@@ -1,0 +1,58 @@
+
+                        HOW TO CREATE YOUR OWN RSA KEY
+                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  This text is not about PGP's -kg parameter. ;-)
+
+  This text is about generating 3 numbers - D,E,N, which used in RSA
+  encryption sheme.
+
+  Well, if you are clever guy, you can read some fucking manuals and
+  write program generating these fucking numbers.
+  If you have nothing to do, you can download pgp sources & rip subroutines
+  generating these fucking numbers.
+  Also, you can try to extract these fucking numbers from the public/secret
+  PGP keys, but then you will do blowjob with prompting password and
+  decrypting secret key, which also requires reading manuals.
+
+  So, how to generate these fucking three numbers?
+
+  1. Take PGP 2.6.x
+  2. Using '-l' command line option, or 'verbose = 2' line in config.txt,
+     generate ('-kg') any PGP key -- all big numbers will be written
+     to the screen.
+
+  You will see something like that:
+
+[...]
+   0 * -Enough, thank you.
+.............**** ................****
+Key ID 78EDE91D
+ modulus n = C3DD 2950 50B5 7800 9068 8F50 B05F B6CB ...
+exponent e = 0011
+Display secret components (y/N)?y
+exponent d = 3F5E 23F4 5658 D400 2EB8 6A9A 1AF1 CA32 ...
+[...]
+
+  So, now you have fucking numbers.
+  On the screen.
+  If you're sucker, you will redirect standard output to some file.
+  When i did two keys in such way, i understood -- it is sucks.
+  Dont believe me? - try yourself.
+
+  So, all you need is not love, but screen grabber.
+  And program which will analyze output and convert produced numbers
+  from text to binary or to anything else.
+  The first one called SCRGRAB.COM, the second one is TXT2DEN.EXE.
+  Both are available at http://z0mbie.host.sk
+
+  To produce PGP output file:
+  SCRGRAB outfile PGP.EXE -kg -l
+
+  To get numbers from this file:
+  TXT2DEN outfile
+
+  Hmm, thats all.
+  See this line? This means you must to pay me $5 for reading this text.
+
+                                                                      Z0MBiE

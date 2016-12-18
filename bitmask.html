@@ -1,0 +1,364 @@
+<html>
+<head>
+<title>О ДИСАССЕМБЛИРОВАНИИ И БИТОВЫХ МАСКАХ</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B4B8B4 text=#000000 link=#0000EE vlink=#551A8B>
+
+<h1 align=center>О ДИСАССЕМБЛИРОВАНИИ И БИТОВЫХ МАСКАХ</h1>
+
+<h2 align=center>ПОСТАНОВКА ЗАДАЧИ</h2>
+
+</p>Каждому нормальному человеку в жизни на каждом шагу встречается
+дисассемблирование,
+а тот, кто никогда не видел битовых масок - вообще не жил. ;-)<br>
+Исходя из этого, рассмотрим вопрос подробнее.<p>
+
+<p>Пусть есть код x86 процессора.
+И пусть нам необходимо написать процедуру,
+дисассемблирующую (разбирающую) команды процессора (инструкции).<p>
+
+<p>Здесь дисассемблировать значит решить (не все но некоторые) такие
+задачи, как:<p>
+
+<ul>
+<li>определение длины инструкции
+<li>определение регистров, используемых в инструкции
+<li>определение, например арифметической операции, которую выполняет инструкция и т.п.
+</ul>
+
+<h2 align=center>МЕТОДЫ ДИСАССЕМБЛИРОВАНИЯ</h2>
+
+<p>Поскольку (для одной инструкции) значения битов, установленных в предыдущих
+байтах определяют дальнейший ход разбора последующих байтов,
+и все инструкции переменной длины, то разбирать их придется
+байт за байтом.</p>
+
+<p>Возможно несколько способов побайтового разбора инструкций.<p>
+
+<h3>1. Дисассемблирование с использованием данных</h3>
+
+<h3>1.1. Организация массива переходов, по одному на каждый байт.</h3>
+
+<pre><font color=#000080>
+disasm:         ...
+                lodsb                   ; взять байт - код инструкции
+                movzx   ebx, al
+                jmp     jmptable[ebx*4] ; вызвать соответствующую процедуру
+                ...
+jmptable        dd      opc_00, opc_01, ...
+</font></pre>
+
+<p>Такой способ достаточно быстрый, занимает много памяти,
+весьма удобен для различных эмуляторов,
+и имеет потенциальную возможность для дисассемблирования всех инструкций.
+(так как 256 указателей)</p>
+
+<h3>1.2. Организация массива данных</h3>
+
+<p>Этод способ не сильно отличается от предыдущего, за исключением того, что
+вместо указателей на процедуры в таблице хранятся флаги, в соответствии
+с которыми выполняются те или иные действия.</p>
+
+<pre><font color=#000080>
+disasm:         ...
+                lodsb                   ; взять байт - код инструкции
+                movzx   ebx, al
+                mov     ecx, flagtable[ebx*4] ; получить флаги
+                ...
+                test    ecx, flag_prefix  ; выполнять действия в соответствии
+                jnz     __prefix          ; с флагами
+                ...
+                test    ecx, flag_modrm
+                jnz     __modrm
+                ...
+flagtable       dd      flag_modrm+flag_s+flag_w, ...
+</font></pre>
+
+<h3>Примечание</h3>
+
+<p>Надо сказать, что возможны модификации этих способов, когда вместо
+таблиц для байтов будут хранится таблицы для слов.</p>
+
+<pre><font color=#000080>
+xxxtable        dd      65536 dup (?)   ; 256k
+</font></pre>
+
+<p>Лет десять назад за такие вещи сожгли бы на костре ;-), а сегодня уже
+не каждый скажет, что это заняло бы много памяти.
+Хотя для некоторых случаев можно было бы увеличить скорость
+дисассемблирования.</p>
+
+<h3>Недостатки</h3>
+
+<ol>
+<li>Одной килобайтной таблицей указателей/флагов дисассемблирование
+отнюдь не исчерпывается.
+<li>Бывают такие случаи, когда нужно дисассемблировать не все инструкции
+процессора, а только некоторый известный их набор, и тогда создавать
+таблицы данных не совсем удобно.
+<li> Не всегда удобно хранить в программе данные.
+(например в случае пермутирующих вирусов)
+</ol>
+
+<h3>2. Дисассемблирование без использования данных</h3>
+
+<p>Здесь обсуждается по-сути, преобразование вышеперечисленных таблиц в код.</p>
+
+<p>Но вы ошибаетесь, если думаете, что я предложу сделать так:</p>
+
+<pre><font color=#000080>
+disasm:         ...
+                lodsb
+                ...
+                cmp     al, 00h
+                je      opc_00
+                ...
+                cmp     al, 0FFh
+                je      opc_FF
+                ...
+</font></pre>
+
+<h3>2.1. Преобразование таблицы переходов в код с использованием "дерева"</h3>
+
+<p>Здесь идея заключается в том, чтобы таблицу переходов преобразовать в код
+процессора следующим образом:</p>
+
+<pre><font color=#000080>
+disasm:         ...
+                lodsb
+                shl     al, 1
+                jnc     opc_0xxxxxxx
+                jc      opc_1xxxxxxx
+                ...
+opc_0xxxxxxx:   shl     al, 1
+                jnc     opc_00xxxxxx
+                jc      opc_01xxxxxx
+                ...
+</font></pre>
+
+<p>Преимущество метода в том, что дерево вовсе не является строго "двоичным",
+и для битовых масок, которые содержат "любые" значения
+цепочка команд будет несколько короче.</p>
+<p>Например для сегментных префиксов 26,2E,36,3E и соответствующей им
+битовой маски 001xx110 будут выполнены примерно следующие инструкции:</p>
+
+<pre><font color=#000080>
+                ...
+                test    al, 10000000b
+                jz      opc_0xxxxxxx    ; jmp
+opc_0xxxxxxx:   test    al, 01000000b
+                jz      opc_00xxxxxx    ; jmp
+opc_00xxxxxx:   test    al, 00100000b
+                jz      opc_000xxxxx    ; no jmp
+                jnz     opc_001xxxxx    ; jmp
+opc_001xxxxx:   ; здесь два элемента дерева пропущены - и в этом плюс
+                test    al, 00000100b
+                jz      opc_001xx0xx    ; no jmp
+                jz      opc_001xx1xx    ; jmp
+                ...
+</font></pre>
+
+<h3>2.2. Сравнение с использованием битовых масок</h3>
+
+<p>В этом методе последовательно выполняются проверки битовых масок.</p>
+
+<p>Итак, пусть нам нужно выявить все сегментные префиксы, как то -
+ES,CS,SS,DS,FS и GS.</p>
+
+<p>Очевидно, что опкоды их кодируются так:</p>
+
+<pre>
+ES: 26 00100110
+CS: 2E 00110110
+SS: 36 00101110
+DS: 3E 00111110
+FS: 64 01100100
+GS: 65 01100101
+</pre>
+
+<p>и тогда мы имеем две битовых маски: 001xx110 и 0110010x</p>
+
+<p>Возникает вопрос, как вместо 6-ти сравнений и переходов сделать что-то
+более правильное.</p>
+
+<p>Эта проблема решается достаточно просто.
+Например вот так:</p>
+
+<pre><font color=#000080>
+disasm:         ...
+                lodsb
+                ...
+                push    eax
+                and     al, 11111110    ; 64/65
+                cmp     al, 01100100
+                pop     eax
+                je      __prefix_seg
+                ...
+                push    eax
+                and     al, 11100111b   ; 26/2E/36/3E
+                cmp     al, 00100110b
+                pop     eax
+                je      __prefix_seg
+                ...
+</font></pre>
+
+<h2 align=center>БИТОВЫЕ МАСКИ</h2>
+
+<p>Но вся проблема в том, что редкий маньяк будет в ручную
+переделывать битовые маски из таблицы опкодов в битовые значения для
+команд and и cmp, ибо
+опкодов тьма, а набивать еще в два раза больше - совсем тяжело.</p>
+
+<p>В общем, к чему я это все.
+Гвоздем этого текста призван стать нижеследующий макрос.</p>
+
+<pre><font color=#000080>
+; --- begin CMPJ.MAC -----------------------------------------------------
+; programmed/debugged under TASM32 5.0
+
+; by default assigned BX = not AX
+
+cmpj_al                 equ     al      ; регистры по умолчанию
+cmpj_bl                 equ     bl
+cmpj_ax                 equ     ax
+cmpj_bx                 equ     bx
+
+; примеры использования макроса:
+
+; cmpj E9,label   --&gt;   cmp al, E9 / je label
+; cmpj 6x,label   --&gt;   test bl,60 / jnz skip
+;                         / test al,90 / jz label / skip:
+; cmpj 0x,label   --&gt;   test al,F0 / jz label
+; cmpj xF,label   --&gt;   test bl,0F / jz label
+; cmpj xx,label   --&gt;   jmp label
+; cmpj 8x,label   --&gt;   push eax / and al, F0
+;                         / cmp al, 80 / pop eax / je label
+
+; cmpj 100010xx,label
+; cmpj 1xx4,label
+; cmpj xx000xxx11111111,label
+
+; виды параметров, передаваемых макросу:
+
+; cmpj HH,label                  hex form, 2 digits (0..9,A..F or "x")
+; cmpj HHHH,label                hex form, 4 digits (0..9,A..F or "x")
+; cmpj BBBBBBBB,label            binary form, 8 digits (0..1 or "x")
+; cmpj BBBBBBBBBBBBBBBB,label    binary form, 16 digits (0..1 or "x")
+
+; lower-case hex-digits "a".."f" are available
+
+cmpj                    macro   mask, label
+                        local   count,base,reg0,reg1,max,andmask,cmpmask,i
+                        local   skip,mask0,mask1
+                        count   = 0
+                        irpc    c,&lt;mask&gt;
+                          count   = count + 1
+                        endm ;irpc
+                        if      count eq 2
+                          base    = 16
+                          max     = 255
+                          reg1    = cmpj_al
+                          reg0    = cmpj_bl
+                        elseif  count eq 4
+                          base    = 16
+                          max     = 65535
+                          reg1    = cmpj_ax
+                          reg0    = cmpj_bx
+                        elseif  count eq 8
+                          base    = 2
+                          max     = 255
+                          reg1    = cmpj_al
+                          reg0    = cmpj_bl
+                        elseif  count eq 16
+                          base    = 2
+                          max     = 65535
+                          reg1    = cmpj_ax
+                          reg0    = cmpj_bx
+                        else
+                          %out cmpj: invalid bitmask(mask) length
+                          .err
+                        exitm
+                        endif
+                        andmask = 0
+                        cmpmask = 0
+                        irpc    c,&lt;mask&gt;
+                          andmask = andmask * base
+                          cmpmask = cmpmask * base
+                          if      ("&c" ge "0") and ("&c" le "9")
+                            i       = "&c"-"0"
+                          elseif  ("&c" ge "a") and ("&c" le "f")
+                            i       = "&c"-"a"+10
+                          elseif  ("&c" ge "A") and ("&c" le "F")
+                            i       = "&c"-"A"+10
+                          elseif  ("&c" eq "x") or ("&c" eq "X")
+                            i       = -1
+                          else
+                            %out cmpj: invalid digit in bitmask(mask) -- c
+                            .err
+                            exitm
+                          endif
+                          if      i ge base
+                            %out cmpj: too big digit in bitmask(mask) -- c
+                            .err
+                            exitm
+                          endif
+                          if      i ne -1
+                            andmask = andmask + base-1
+                            cmpmask = cmpmask + i
+                          endif
+                        endm;irpc
+                        mask0   = cmpmask
+                        mask1   = andmask xor cmpmask
+                        if      andmask eq max
+                          cmp     reg1, cmpmask
+                          je      label
+                        else
+                          if      cmpmask eq 0
+                            if      andmask eq 0
+                              jmp     label
+                            else
+                              test    reg1, andmask
+                              jz      label
+                            endif
+                          else
+;                           push    eax
+;                           and     reg, andmask
+;                           cmp     reg, cmpmask
+;                           pop     eax
+;                           je      label
+                            if      mask1 eq 0
+                              test    reg0, mask0
+                              jz      label
+                            else
+                              test    reg0, mask0
+                              jnz     skip
+                              test    reg1, mask1
+                              jz      label
+skip:                       endif
+                          endif
+                        endif
+                        endm;cmpj
+
+; --- end CMPJ.MAC -------------------------------------------------------
+</font></pre>
+
+<p>Используется макрос так: в AX загружается значение опкода и следующего за
+ним байта (на случай двухбайтовых проверок), в BX загружается not AX.<br>
+Первым параметром макросу подается битовая маска, вторым - имя метки,
+на которую передавать управление.</p>
+
+<pre><font color=#000080>
+disasm:         ...
+                mov     eax, [esi]
+                mov     ebx, eax
+                not     ebx
+                ...
+                cmpj    001xx000,__prefix_seg
+                cmpj    0110010x,__prefix_seg
+                ...
+</font></pre>
+
+<p>Вот собственно и все. Возможности макроса понятны из комментариев к нему.</p>
+
+<p al

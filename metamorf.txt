@@ -1,0 +1,32 @@
+
+METAMORPHISM AND PERMUTATION: FEEL THE DIFFERENCE
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tasks of the metamorphism and permutation technologies are to make virus
+more complex, thus
+1. prolonging time of writing antiviral code, and
+2. increasing time of the infected objects detection.
+
+But, contrary to public opinion,
+implementations of these techonogies are different!
+
+Metamorphism means that your virus contains some [encrypted] data
+which is used to generate new polymorphic copy.
+
+As a rule, new polymorphic copy will be only executed after its
+generation, so it may contain any trash instructions and be of any size.
+
+Typical metamorphic viruses are TMC and LEXOTAN.
+
+Permutating viruses are NOT containing such encrypted data, they are
+using only current code to generate new polymorphic copy.
+
+Permutating virus always must be able to get length of any own instruction.
+This may be achieved by writing disassembler (ZCME,RPME) or making
+all instructions of the same length (in the PLY-viruses all instructions
+are NOP-padded to 3-byte length).
+
+So, metamorphism means GENERATING NEW CODE,
+and permutation means USING OLD CODE.
+
+                                                                   Z0MBiE

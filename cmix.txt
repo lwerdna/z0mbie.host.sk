@@ -1,0 +1,78 @@
+
+                                  CODE MIXER
+                                 version 1.50
+
+  CODE MIXER is an utility (subroutine, library, engine, include file, ...)
+  to mix 2 code buffers.
+  The destination buffer will contain all instructions of the source buffers
+  mixed between each other in random order.
+
+  src buf #1        src buf #2      dest buf
+  ------------      ------------    -------------
+  imul eax, ebx     add edi,1       add edi,1
+q:cdq               add edi,2       imul eax, ebx
+  xor ecx, ecx      add edi,3     q:cdq
+  jz  q             loop $-2        add edi,2
+  nop                               xor ecx,ecx  ; next cmd is jxx
+                                    jz q         ; jxx-expanded to near,fixed
+                                    add edi,3
+                                    nop
+                                    loop $-2     ; loop/z/nz/jecxz-ignored
+
+
+  CODEMIXER uses two external subroutines, rnd() and disasm(), both should
+  be written in C calling convention (i.e. return control with RET).
+
+  DWORD rnd(DWORD) returns random number,
+  DWORD disasm(BYTE* cmd) returns length of the command and -1 if error.
+
+  In the example used simple randomer and external disassembler (LDE32).
+  But you are always able to use your own randomer and/or disassembler.
+
+                              CALLING CODEMIXER
+
+        include cmix.inc
+
+        pusho   offset disasm   ; DWORD disasm(BYTE*)
+        pusho   offset rnd      ; DWORD rnd(DWORD range)
+        push    offset srcbuf1  ; source buffer #1 -- offset
+        push    size srcbuf1    ; ... size
+        push    offset srcbuf2  ; source buffer #2 -- offset
+        push    size srcbuf2    ; ... size
+        push    offset destbuf  ; destination buffer -- offset
+        push    size destbuf    ; ... maximal size
+        push    offset destsize ; ... pointer to new size (DWORD PTR)
+        push    maxcmd          ; max # of commands (in both buffers)
+        call    codemixer
+
+  Return values:
+        EAX==0 if success, destsize=size of the destination buffer
+        EAX!=0 if error, error codes (CM_ERR_xxx) see in the CMIX.INC
+
+                                   FEATURES
+
+  - code is offset-independent, so it can be displaced or permutated
+  - no external data used, only own stack vars
+  - jmps/calls (E8,E9,7x,0F 8x) are fixed
+    (to point correctly to the new addresses)
+  - external jmps/calls (i.e. out of the source buffers) are fixed correctly
+  - short jmps (7x,EB) are expanded into near jmps
+  - if next command is jxx (short or near), it will be stored after current
+    command, without inserting other buffer commands before jxx
+  - commands jecxz,loop,loopz,loopnz (E0/E1/E2/E3) are ignored
+
+                         WHERE CODEMIXER CAN BE USED
+
+  - to create polymorphic decryptors
+       1. generate simple decryptor (as in crypt-virus)
+       2. generate some trash (easy with ETG engine)
+       3. mix buffers
+
+  - to mix some commands from host 's startup and from virus's startup
+
+  - to generate some hash-alike functions
+    for example:
+    dst-reg-set = [REG_EAX],
+    src-reg-set = [REG_EBX],
+    so generated function will return EAX=f(EBX)
+

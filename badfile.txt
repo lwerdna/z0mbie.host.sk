@@ -1,0 +1,16 @@
+
+instruction:
+
+  1. download badfile.zip (z0mbie.host.sk/badfile.zip)
+  2. extract badfile.bin (NOTE: its just a duplicated 2048-byte array;
+       probably any 8 byte read/stored at 8-aligned position is enough)
+  3. write it to cd
+  4. read
+
+origin:
+  http://www.ixbt.com/optical/magia-chisel.shtml
+
+idea:
+  append such a file to all .MP3 files and archives (at 8-aligned pos);
+  insert such 8-byte signatures into own virii
+

@@ -1,0 +1,352 @@
+<html>
+<head>
+<title>Детектируем пермутирующий вирус</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#000080 alink=#000000 vlink=#000080>
+
+<h2 align=center>ДЕТЕКТИРУЕМ ПЕРМУТИРУЮЩИЙ ВИРУС</h2>
+<h3 align=center>by Eugene Ka<a href="zperm.html">ZPERM</a>sky</h3>
+
+<p>Итак, вышел очередной апдейт оп каспера - коий умеет детектить два
+пермутирующих вируса.
+
+<p>Один вирус (win32.zperm.a == <a href="z0mbie6a.zip">rpme.z0mbie6a</a>) написан с использованием движка
+<a href="rpme.zip">RPME</a>, который позволяет раскидать команды вируса по некоторому буферу и
+связать их JMP-ами, ну и плюс к этому некоторые другие фичи.
+
+<p>Второй вирус (win32.zperm.b == <a href="z0mbie7.zip">z0mbie7</a>) это почти то же самое, но вместо RPME
+там Ply-подобная мутация, то есть каждая команда дополнена до 16 байт NOPами,
+"плавает" в них, и кроме этого каждый 16-байтный блок может перемещаться
+в случайную область буфера, и все, опять же, связывается JMP-ами.
+
+<p>Следует сказать, что каспер весьма порадовал тем, что продетектил
+оба вируса одним и тем же кодом.
+А особенно мне понравилось название вирусов.
+
+<p>Детектирующий же алгоритм выглядит весьма недальновидно,
+а уж о каких-нибудь там гениальных идеях и говорить не приходится.
+
+<p>В общем, детектирование проводится так:
+
+<p>(*) Брать команды по одной,
+      удалять среди них JMPы и NOPы,
+      полиморфные команды приводить к одному виду,
+      переменные аргументы заменять на 0,
+      копировать все это в буфер.
+<p>(**) Просчитать по буферу контрольную сумму
+
+<p>Как видим, отличие от детектирования обычных вирусов только в (*).
+Причем, выполняется (*) только при некоторых условиях, например если
+хотя бы две команды файла совпадают с вирусными - это для того, чтобы не
+тормозить на всех файлах подряд.
+Выход из (*) осуществляется при фиксированных количестве или суммарной длине
+команд, или при нахождении некоторого характерного опкода,
+в нашем случае CALL EAX, либо же при нахождении опкода отсутствующего
+в детектируемой области вируса.
+
+<p>Короче говоря, алгоритм писался на конкретный вирус явно без учета всех
+возможностей пермутирующего движка.
+Например "обменяные" местами ветви алгоритма (при замене jz <--> jnz) и
+перемешанные инструкции не обрабатываются никак.
+Наверное это потому, что такие конструкции не встречаются в самом начале
+вируса, а именно по его началу и проводится проверка контрольной суммы.
+Это, в свою очередь, является продолжением старой традиции антивирусников
+детектировать вирус по длине контрольной суммы не составляющей и десяти
+процентов от общей длины вируса.
+
+<p>Ниже приведен детектирующий антивирусный код.
+
+<pre>
+=====[begin ZPERM.ASM]======================================================
+
+; source: zperm.c (up000630.avc/_o_a0001.o32)
+
+; 4550 cs1=(0000,04,50155015) cs2=(1400,32,120E7C33) name=Win32.ZPerm.a
+; 4B8B cs1=(06BE,10,FC08C1F7) cs2=(06BE,C0,29104DF1) name=Win32.ZPerm.a#
+; BD60 cs1=(1400,07,24F92413) cs2=(1400,2A,34D5DC13) name=Win32.ZPerm.b
+; FBE8 cs1=(0400,07,D8E48C4A) cs2=(0600,C0,4D20871B) name=Win32.ZPerm.b#
+
+_decode         proc near
+
+virus_variant   = byte ptr -7           ; 1=a(z6a) 0=b(z7)
+opcode          = word ptr -6
+ibuf_offset     = dword ptr -4
+
+ibuf            = edi           ; ibuf: входной буфер
+i               = ebx           ;
+
+o               = esi           ; выходной буфер
+
+opcode_count    = ebp           ; число опкодов в цикле (*)
+
+                sub     esp, 8
+
+; проверить первую команду файла
+                cmp     opcode_1, 60h     ; 60=pusha
+                je      __found1
+                cmp     opcode_1, 0E9h    ; E9=jmp
+                je      __found1
+                cmp     opcode_1, 90h     ; 90=nop
+                jne     __exit
+
+; проверить вторую команду файла
+__found1:
+                cmp     opcode_2, 60h
+                je      __found2
+                cmp     opcode_2, 0E9h
+                je      __found2
+                cmp     opcode_2, 90h
+                jne     __exit
+
+__found2:
+                xor     opcode_count, opcode_count
+                xor     o, o
+                xor     i, i
+                mov     ibuf, offset opcode_2
+                mov     virus_variant, 1 ; 1=a(z6a) 0=b(z7)
+                mov     eax, _EP_Next
+                mov     ibuf_offset, eax
+
+                ; цикл (*)
+__cycle:
+                inc     opcode_count
+                cmp     o, 80h
+                ja      __virus_found
+
+__check_max:
+                cmp     i, 100h
+                ja      __exit
+                cmp     opcode_count, 100h
+                ja      __exit
+
+                mov     ax, ibuf[i]
+                mov     opcode, ax
+
+                xor     ecx, ecx
+                mov     cl, al
+                sub     ecx, 0Fh
+                cmp     ecx, 0F0h
+                ja      __exit
+                xor     edx, edx
+                mov     dl, index_table[ecx]
+                jmp     jmp_table[edx*4]
+
+i11__NOP:
+                mov     virus_variant, 0 ; 1=a(z6a) 0=b(z7)
+                inc     i
+                cmp     o, 80h
+                jbe     __check_max
+
+__virus_found:
+                ; BD == mov ebp, &lt;virus-entry-va&gt;
+                cmp     byte ptr obuf+1, 0BDh
+                jne     __exit3
+                mov     dword ptr obuf+2, 0 ; zerofill variable dword
+
+__exit3:
+
+                mov     ax, 2           ; 2=found???
+
+                add     esp, 8
+                retn
+; --------------------------------------------------------------------------
+; 0F == Jxx (near)
+
+i0__opcode_0F:
+
+                mov     obuf[o], al
+                inc     o
+                inc     o
+                mov     al, opcode.byte ptr 1
+                and     al, 0F0h
+                mov     (obuf-1)[o], al
+
+                xor     eax, eax
+                mov     al, opcode.byte ptr 1
+
+                cmp     eax, 84h        ; jz
+                je      __jz_skip
+                cmp     eax, 85h        ; jnz
+                je      __jnz_process
+
+__exit:
+
+                xor     ax, ax          ; 0=not found
+
+                add     esp, 8
+                retn
+; --------------------------------------------------------------------------
+
+__jz_skip:
+                add     i, 6
+                jmp     __cycle
+; --------------------------------------------------------------------------
+
+__jnz_process:
+                mov     eax, [ibuf+i+2]
+                add     eax, i
+                add     eax, 6
+                jmp     loc_0_1CF
+; --------------------------------------------------------------------------
+; 29,2B=sub  31,33=xor
+
+i1234_xorsub:
+
+                cmp     opcode.byte ptr 1, 0C0h
+                jne     __exit
+
+                add     o, 2
+                add     i, 2
+                mov     word ptr (obuf-2)[o], 0C031h
+                jmp     __cycle
+; --------------------------------------------------------------------------
+
+i7__FS:
+
+                xor     eax, eax
+                mov     al, opcode.byte ptr 1
+                cmp     eax, 67h
+                je      __copy_6
+                cmp     eax, 89h
+                je      __copy_3
+                cmp     eax, 0FFh
+                je      __copy_3
+
+__exit2:
+                xor     ax, ax          ; 0=not found
+
+                add     esp, 8
+                retn
+; --------------------------------------------------------------------------
+
+__copy_6:
+                mov     al, ibuf[i]
+                inc     i
+                mov     obuf[o], al
+                inc     o
+
+i8121314__copy_5:
+
+                mov     al, ibuf[i]
+                inc     i
+                mov     obuf[o], al
+                inc     o
+
+i10__copy_4:
+
+                mov     al, ibuf[i]
+                inc     i
+                mov     obuf[o], al
+                inc     o
+
+__copy_3:
+                mov     al, ibuf[i]
+                inc     i
+                mov     obuf[o], al
+                inc     o
+
+i9__copy_2:
+
+                mov     al, ibuf[i]
+                inc     i
+                mov     obuf[o], al
+                inc     o
+
+i56__copy_1:
+
+                mov     al, ibuf[i]
+                inc     i
+                mov     obuf[o], al
+                inc     o
+
+                jmp     __cycle
+; --------------------------------------------------------------------------
+
+i15__E8call:
+
+                cmp     virus_variant, 0 ; 1=a(z6a) 0=b(z7)
+                jne     loc_0_1C1
+                mov     obuf[o], al
+                inc     o
+                mov     dword ptr obuf[o], 0
+                add     o, 4
+                add     i, 5
+                jmp     __cycle
+; --------------------------------------------------------------------------
+
+loc_0_1C1:
+                mov     virus_variant, 0 ; 1=a(z6a) 0=b(z7)
+
+i16__E9jmp:
+
+                mov     eax, [ibuf+i+1]
+                add     eax, i
+                add     eax, 5
+
+loc_0_1CF:
+; подчитываем требуемую область файла
+                add     ibuf_offset, eax
+                push    100h
+                mov     eax, ibuf_offset
+                push    offset obuf+80h
+                push    eax
+                mov     ibuf, offset obuf+80h
+                xor     i, i
+                call    _Seek_Read
+                add     esp, 0Ch
+
+                jmp     __cycle
+; --------------------------------------------------------------------------
+
+i17__op_FF:
+                cmp     opcode.byte ptr 1, 0D0h  ; FF D0 == call eax
+                jne     __exit
+                mov     ax, ibuf[i]     ; выход из цикла (*) по опкоду FF D0
+                mov     obuf[o], ax
+                jmp     __virus_found
+
+_decode         endp
+
+; --------------------------------------------------------------------------
+
+jmp_table       dd offset i0__opcode_0F       ; 0
+                dd offset i1234_xorsub        ; 1
+                dd offset i1234_xorsub        ; 2
+                dd offset i1234_xorsub        ; 3
+                dd offset i1234_xorsub        ; 4
+                dd offset i56__copy_1         ; 5
+                dd offset i56__copy_1         ; 6
+                dd offset i7__FS              ; 7
+                dd offset i8121314__copy_5    ; 8
+                dd offset i9__copy_2          ; 9
+                dd offset i10__copy_4         ; 10
+                dd offset i11__NOP            ; 11
+                dd offset i8121314__copy_5    ; 12
+                dd offset i8121314__copy_5    ; 13
+                dd offset i8121314__copy_5    ; 14
+                dd offset i15__E8call         ; 15
+                dd offset i16__E9jmp          ; 16
+                dd offset i17__op_FF          ; 17
+                dd offset __exit              ; 18=xx
+; 18 = exit
+xx = 18
+index_table label byte
+ db  0                                                              ; 0F
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; 1x
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx,  1, xx,  2, xx, xx, xx, xx ; 2x
+ db  xx,  3, xx,  4, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; 3x
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; 4x
+ db  xx, xx, xx, xx, xx, xx, xx, xx,  5, xx, xx, xx, xx, xx, xx, xx ; 5x
+ db   6,  6, xx, xx,  7, xx, xx, xx,  8, xx,  9, xx, xx, xx, xx, xx ; 6x
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; 7x
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, 10, xx, xx, xx, xx, xx, xx ; 8x
+ db  11, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; 9x
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; Ax
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, 12, xx, 13, xx, 14 ; Bx
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; Cx
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx ; Dx
+ db  xx, xx, xx, xx, xx, xx, xx, xx, 15, 16, xx, xx, xx, xx, xx, xx ; Ex
+ db  xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, xx, 17 ; Fx
+
+==

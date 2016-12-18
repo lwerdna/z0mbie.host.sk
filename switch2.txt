@@ -1,0 +1,424 @@
+
+                                 TCP switch
+                                 ----------
+
+This tool allows you to manage tcp connections.
+
+For shellcodes creates with "win32 ShellCode Constructor" it is possible
+to upload/exec some plugins.
+
+Using simple commands, you can implement such algorithms as:
+   "listen on ports A and B;
+    wait until connection C1 is made to port A;
+    keep C1 until C2 is connected to port B;
+    then, interlink C1 with C2."
+or
+   "listen on port A;
+    for each connection C1[i] made to port A,
+    make corresponding C2[i] by connecting to specified ip:port,
+    then interlink C1[i] with C2[i]."
+or
+   "inject specified file into existing connection C1."
+
+Generally, tcpswitch keeps directed graph of links between tcp connections,
+so you can configure it to work as tcp mapper or make simple tcp chat,
+or link 2 tcp sessions and then inject your program between'em,
+while keeping sessions alive, whatever.
+
+When started, tcpswitch exec all commands defined in switch2.ini;
+if .ini file doesn't exists, it listens for commands on 666/tcp.
+The same commands are valid for both .ini file and control sessions.
+
+Control session should operate with "lines" of data, instead of characters;
+use correct telnet client.
+
+switch logic
+------------
+
+There exists a set of entries, each entry has unique id.
+Entry describes established, listening or waiting tcp session.
+Each entry has its own set of links to other id's,
+i.e. any entry can point to any set of other entries;
+All tcpswitch commands operates on these entries and on links between 'em.
+
+Each entry can be in one of the following states:
+
+  STATUS_LISTEN_CTL  -- open socket listening for control sessions.
+                        created using 'listenctl' command;
+
+                        for each connection to the corresponding port,
+                        new entry is created of STATUS_CTL.
+
+  STATUS_CTL         -- established control session.
+                        If some data is received in,
+                        it is processed as a set of control commands.
+                        When some internal switch event occurs,
+                        report text is sent to all such sessions.
+
+                        such entry can only be created as a child of
+                        STATUS_LISTEN_CTL entry.
+
+  STATUS_DATA        -- established data session.
+
+                        can be created using 'connect' command,
+                        or as a child of STATUS_LISTEN_DATA/STATUS_WAITCONN_DATA
+                        entries.
+
+                        When some data is received, it is
+                        broadcasted to all "linked" data sessions.
+
+                        len = recv(socket[i], data)
+                        foreach j
+                        if (lnk[i][j])
+                          send(socket[j], data, len)
+
+                        when connection is closed somehow,
+                        linked connections behaviour depends on link type.
+
+  STATUS_WAITCONN_DATA -- created using 'initconn' command;
+                        means ip:port (no open socket);
+
+                        used as a parent entry for all automatic
+                        connections to the corresponding ip:port.
+
+  STATUS_LISTEN_DATA -- created using 'listen' command;
+                        means open socket listening for data sessions.
+
+                        if somebody connects to this socket,
+                        new entry is created of status STATUS_DATA.
+
+                        then, new connections are created (optionally)
+                        and some new links are established between entries.
+
+Each link between two entries can have one of the following values:
+
+  1  SINGLE,KEEP
+  2  SINGLE,DROP
+  3  MULTI,KEEP
+  4  MULTI,DROP
+
+  "SINGLE" means that link is exclusive, i.e. only one (directed) link
+  of SINGLE type can exists between any two connections;
+  "MULTI" property means that data can be broadcasted to/from
+  multiple connections.
+
+  "KEEP"/"DROP" properties affects linked entries behaviour when
+  one of them is closed.
+
+  If some shellcode is connected to the tcpswitch,
+  you can link (type 1) own connection with it, then
+  you can feel free to reconnect, shellcode will not be dropped.
+
+  Entry linked with others using type 4 will be closed
+  with last closed connection.
+
+  Lets imagine entry X of type T, which is already connected to entry Y.
+  When such a connection is dropped, the following actions will occur:
+
+  T=1    X remains open
+  T=2    X is closed
+  T=3    X remains open
+  T=4    X is closed, only if there are no more connections to/from X
+
+  nb: closing entry X may result in closing other entries connected to it.
+
+Available commands are:
+----------------------
+
+  help                     -- show quick command syntax
+
+  listenctl <port>         -- listen for "control sessions" on 0.0.0.0:<port>
+                              (add new socket to listen on, return id)
+
+  listen <port>            -- listen for "data sessions" on 0.0.0.0:<port>
+                              (add new socket to listen on, return id)
+
+  conn <ip> <port>         -- immediately connect to ip:port, returns id
+
+  initconn <ip> <port>     -- allocate ip:port to connect to, returns id
+
+  kill id                  -- close socket/session by id
+
+  xlink dstid1 dstid2 value -- cross-link two established data sessions
+                               by their id's
+
+  link id1 id2 value        -- link/unlink session id1 to id2.
+                               all data received from id1 will be sent to id2.
+
+  show [id]                -- show all info about current connections
+
+  showlinks                -- show links table
+
+  exit                     -- exit current "control session"
+
+  die                      -- exit from memory
+
+  inject id prefix snippet.bin [text] -- inject code snippet
+                                         into data session
+
+  (experimental)
+  [un]mitm m_id1 m_id2 id1 id2   -- set/unset m_id1,2 as man-in-the-middle
+                                    connections on two connected
+                                    sockets id1/id2.
+                                    mitm mode:
+                                         id1 --> m_id1 --> id2
+                                         id1 <-- m_id2 <-- id2
+                                    unmitm mode:
+                                         id1 <==> id2
+
+  Macros can be used instead of connection id's:
+
+  L<port>   1st found connection with specified local port
+  R<port>   1st found connection with specified remote port
+
+                              Usage example
+                              -------------
+
+On start:
+
+>tcp-switch v2.00
+<show
+>!id=0       status=LISTEN_CTL           local=0.0.0.0:666      remote=N/A              parent=N/A    link:N/A
+>!id=1     * status=CTL                  local=127.0.0.1:666    remote=127.0.0.1:xxxx   parent=0      link:N/A
+
+
+What do we see here?
+
+id=0 is a socket listening for control sessions on port 666
+id=1 is current control session, connected to port 666
+
+Now, lets create socket listening for control sessions on port 777:
+
+<listenctl 777
+>alloc:id=2
+>listen:id=2,port=777
+<show
+>!id=0       status=LISTEN_CTL           local=0.0.0.0:666      remote=N/A              parent=N/A    link:N/A
+>!id=1     * status=CTL                  local=127.0.0.1:666    remote=127.0.0.1:xxxx   parent=0      link:N/A
+>!id=2       status=LISTEN_CTL           local=0.0.0.0:777      remote=N/A              parent=1      link:N/A
+
+
+At this step, tcpswitch listens on both ports 666 and 777.
+To stop listening on port 666, we do the following:
+
+<kill 0
+>kill,id=0
+>close:id=0
+<show
+>!id=1     * status=CTL                  local=127.0.0.1:666    remote=127.0.0.1:xxxx   parent=N/A    link:N/A
+>!id=2       status=LISTEN_CTL           local=0.0.0.0:777      remote=N/A              parent=1      link:N/A
+
+Now, we can reconnect to port 777:
+
+>tcp-switch v2.00
+<show
+>!id=0     * status=CTL                  local=127.0.0.1:777    remote=127.0.0.1:xxxx   parent=2      link:N/A
+>!id=2       status=LISTEN_CTL           local=0.0.0.0:777      remote=N/A              parent=N/A    link:N/A
+
+Now, lets create two sockets listening for data sessions on ports 1000,1001:
+
+<listen 1000
+>alloc:id=1
+>listen:id=1,port=1000
+<listen 1001
+>alloc:id=3
+>listen:id=3,port=1001
+<show
+>!id=0     * status=CTL                  local=127.0.0.1:777    remote=127.0.0.1:xxxx   parent=2      link:N/A
+>!id=1       status=LISTEN_DATA          local=0.0.0.0:1000     remote=N/A              parent=0      link:N/A
+>!id=2       status=LISTEN_CTL           local=0.0.0.0:777      remote=N/A              parent=N/A    link:N/A
+>!id=3       status=LISTEN_DATA          local=0.0.0.0:1001     remote=N/A              parent=0      link:N/A
+
+id=1 and id=3 are two listening sockets.
+
+Now, lets connect (with 2nd and 3rd telnet instances) to ports 1000,1001.
+
+in the control session, the following will appear:
+
+>(alloc:id=4)(connected:id=4,par=1)(alloc:id=5)(connected:id=5,par=3)
+
+then, lets continue in the control session:
+
+<show
+>!id=0     * status=CTL                  local=127.0.0.1:777    remote=127.0.0.1:xxxx   parent=2      link:N/A
+>!id=1       status=LISTEN_DATA          local=0.0.0.0:1000     remote=N/A              parent=0      link:N/A
+>!id=2       status=LISTEN_CTL           local=0.0.0.0:777      remote=N/A              parent=N/A    link:N/A
+>!id=3       status=LISTEN_DATA          local=0.0.0.0:1001     remote=N/A              parent=0      link:N/A
+>!id=4       status=DATA                 local=127.0.0.1:1000   remote=127.0.0.1:xxxx   parent=1      link:N/A
+>!id=5       status=DATA                 local=127.0.0.1:1001   remote=127.0.0.1:xxxx   parent=3      link:N/A
+
+id=4 and id=5 is our new connections.
+Lets cross-link them using link type 2:
+
+<xlink 4 5 2
+>lnk[4,5]=lnk[5,4]=2
+<show
+>...
+>!id=4       status=DATA                 local=127.0.0.1:1000   remote=127.0.0.1:xxxx   parent=1      link: t2=sd: 5
+>!id=5       status=DATA                 local=127.0.0.1:1001   remote=127.0.0.1:xxxx   parent=3      link: t2=sd: 4
+
+Now, data received from one socket will be sent to another one (linked) socket,
+and vice versa.
+
+If you will close connection in 2nd telnet window (corresponding id=4),
+you will see the following:
+
+>(lnk[4,5]=0)(lnk[5,4]=0)(close:id=5)
+<show
+>...
+>!id=4       status=DATA                 local=127.0.0.1:1000   remote=127.0.0.1:xxxx   parent=1      link:N/A
+
+However, connection type were set to 1, i.e. "single/keep",
+and so link with id=4, i.e. telnet #1 remains connected to tcpswitch.
+
+However, link between id=4 & id=5 has been disappeared,
+and, if telnet #2 is reconnected, you can re-establish it manually,
+using the same xlink command.
+
+But, if in the same situation, connection type is set to 2, i.e. "single/drop",
+both links will be closed when only one of the connections is dropped.
+
+There can be also asymmetric situation - when one of links is
+of type 1, and another one is of type 2.
+This could be done using two "link" commands with different types,
+instead of single "xlink" command.
+In such a situation, tcpswitch behaviour will differ, depending
+on which connection is dropped.
+
+For automatic session linking,
+you should setup link id's for "parent" entries,
+either by "link 1 3 t" plus "link 3 1 t" or using "xlink 1 3 t".
+Then, all "childs" connecting to ports 1000/1001 will be
+automatically linked with each other using parent's link type.
+
+<xlink 1 3 1
+>lnk[1,3]=lnk[3,1]=1
+
+Now, reconnect to tcpswitch in 2nd telnet window, then continue:
+
+>(alloc:id=5)(connected:id=5,par=3)(lnk[5,4]=1)(lnk[4,5]=1)
+<show
+>!id=0     * status=CTL                  local=127.0.0.1:777    remote=127.0.0.1:xxxx   parent=2      link:N/A
+>!id=1       status=LISTEN_DATA          local=0.0.0.0:1000     remote=N/A              parent=0      link: t1=sk: 3
+>!id=2       status=LISTEN_CTL           local=0.0.0.0:777      remote=N/A              parent=N/A    link:N/A
+>!id=3       status=LISTEN_DATA          local=0.0.0.0:1001     remote=N/A              parent=0      link: t1=sk: 1
+>!id=4       status=DATA                 local=127.0.0.1:1000   remote=127.0.0.1:xxxx   parent=1      link: t1=sk: 5
+>!id=5       status=DATA                 local=127.0.0.1:1001   remote=127.0.0.1:xxxx   parent=3      link: t1=sk: 4
+
+Now, lets run some shellcode on 127.0.0.1:6666, then,
+to connect to that shellcode, you should do
+
+<conn 127.0.0.1 6666
+>alloc:id=6
+>connect:id=6,127.0.0.1:6666
+
+You can now manually link id=6 with id=4 (id=4 -- 2nd telnet window, port 1000):
+
+<xlink 4 6 1
+>lnk[4,6]=lnk[6,4]=1
+
+Shell should be now active through telnet window #2.
+
+If you now type 'exit' into the shell, connection with id=6 will be closed
+by shellcode, however telnet window #2 will remain active,
+since it were connected directly to tcpswitch (using id=4), not to shellcode.
+
+To automate connect operation, you should use 'initconn' command:
+
+<kill 2
+<...
+<kill 6
+<initconn 127.0.0.1 6666
+>alloc:id=2
+>waitconn:id=2,127.0.0.1:6666
+<show
+>!id=0     * status=CTL                  local=127.0.0.1:777    remote=127.0.0.1:xxxx   parent=N/A    link:N/A
+>!id=1       status=LISTEN_DATA          local=0.0.0.0:1000     remote=N/A              parent=0      link:N/A
+>!id=2       status=WAITCONN_DATA        local=N/A              remote=127.0.0.1:6666   parent=0      link:N/A
+
+Now, if you will link id=1 (listening on port 1000) to id=2,
+all future connections to tcpswitch/port 1000 will result in
+following connections from tcpswitch to 127.0.0.1:6666
+and linking sessions with each other:
+
+<xlink 1 2 1
+>lnk[1,2]=1
+<show
+>!id=0     * status=CTL                  local=127.0.0.1:777    remote=127.0.0.1:xxxx   parent=N/A    link:N/A
+>!id=1       status=LISTEN_DATA          local=0.0.0.0:1000     remote=N/A              parent=0      link: t1=sk: 2
+>!id=2       status=WAITCONN_DATA        local=N/A              remote=127.0.0.1:6666   parent=0      link: t1=sk: 1
+
+Now, reconnect once again to port 1000, you should see the shell:
+
+on connection, in the control window you see:
+>(alloc:id=3)(connected:id=3,par=1)(alloc:id=4)(connect:id=4,127.0.0.1:6666)(lnk[3,4]=1)(lnk[4,3]=1)
+
+then:
+
+<show
+>!id=0     * status=CTL                  local=127.0.0.1:777    remote=127.0.0.1:xxxx   parent=N/A    link:N/A
+>!id=1       status=LISTEN_DATA          local=0.0.0.0:1000     remote=N/A              parent=0      link: t1=sk: 2
+>!id=2       status=WAITCONN_DATA        local=N/A              remote=127.0.0.1:6666   parent=0      link: t1=sk: 1
+>!id=3       status=DATA                 local=127.0.0.1:1000   remote=127.0.0.1:xxxx   parent=1      link: t1=sk: 4
+>!id=4       status=DATA                 local=127.0.0.1:xxxx   remote=127.0.0.1:6666   parent=2      link: t1=sk: 3
+
+What do we saw there?
+Socket with id=1 (with link set to id=2) were listening on port 1000.
+Entry with id=2 means that child entries should be connected to 127.0.0.1:6666.
+So, when you have connected to port 1000 (id=3,parent_id=1), socket with (id=4,parent id=2) were created
+and connection to 127.0.0.1:6666 were made,
+after that, id=3 were interlinked with id=4,
+using connection types from parent id's 1 and 2.
+Now, all the data between 2nd telnet window and shellcode is
+passed through tcpswitch.
+
+
+To inject shellcode plugins, or "code snippets" into some data session,
+you can do the following (shellcode listens on 127.0.0.1:6666)
+
+>conn 127.0.0.1 6666
+>inject 9 #cdsnpt# c:\thahaxor\msgboxt.bin abc
+<injected [#cdsnpt#]+[200]+c:\thahaxor\msgboxt.bin+[abc] into id=9
+
+Except that all, you can specify L<port> and R<port> macros to simplify
+connections linking:
+
+<initconn 127.0.0.1 6666
+>alloc:id=1
+>waitconn:id=1,127.0.0.1:6666
+<listen 1000
+>alloc:id=2
+>listen:id=2,port=1000
+<xlink l1000 r6666 2
+>lnk[2,1]=lnk[1,2]=2
+
+or, all at once:
+
+<initconn 127.0.0.1 6667 listen 1000 xlink l1000 r6667 2
+>alloc:id=1
+>waitconn:id=1,127.0.0.1:6667
+>alloc:id=2
+>listen:id=2,port=1000
+>lnk[2,1]=lnk[1,2]=2
+
+example above will redirect all connections to local port 1000
+to 127.0.0.1:6667.
+
+Now, automatic link of two listen incoming connections:
+
+<listen 2001 listen 2002 xlink l2001 l2002 1
+>alloc:id=1
+>listen:id=1,port=2001
+>alloc:id=2
+>listen:id=2,port=2002
+>lnk[1,2]=lnk[2,1]=1
+
+Now, tcpswitch will listen on ports 2001 and 2002 and link all connection
+pairs to these ports with each other.
+For example, you can run back-connect shellcode somewhere,
+then tcpswitch on some unix machine, and then tcpswitch will keep
+all incoming connections from your shellcode until you connect
+to tcpswitch; then, it will link you to shellcode.
+
+
+EOF

@@ -1,0 +1,225 @@
+
+                           Permutation conditions
+                           ----------------------
+
+Here i'm trying to define conditions, when it is possible to change order
+of some consecutive x86 instructions and instruction blocks,
+i.e. swap them, but keep program working the same.
+
+Imagine that we have "ADD EAX, EBX" which is followed by "MOV ECX, EDX",
+and we know that both instructions are not the destination of some JMP, CALL,
+or any other code/data/algorithmic reference.
+In such a case they can be swapped with each other.
+
+Now lets examine conditions under which such a trick can be performed
+for some arbitrary consecutive instructions.
+
+1. ONE instruction
+
+  Let it consists of:
+    operation code, source object set, destination object set.
+
+  Object set is a bitset of properties, instruction deal with:
+      common registers: EAX,ECX,EDX,EBX,ESI,EDI,ESP,EBP (8 bits)
+    flags (1 bit)
+    memory reference (1 bit)
+
+  We will enclose sets into { } brackets,
+  as such full set is {EAX,EBX,ECX,EDX,ESI,EDI,ESP,EBP,flags,memory}
+  and empty set is {}.
+  In binary notation it may look just like a 10-bit number.
+
+  Memory reference means that at least any byte in memory can be read/written
+  by our instruction.
+  We dont distinguish memory addresses, because of the following:
+  if there are two instructions,
+  first one accessing memory at [eax],
+  second one accessing memory at [ebx],
+  and we dont know if eax/ebx are equal or not (or 4-byte ranges intersects);
+  then, it is just a memory reference for us,
+  and we only know that it could be the same variable.
+
+  Other properties, such as EIP, segment-, FPU-, MMX-, SSE-registers,
+  are not considered here, since limited application of our theory.
+  We just assume, that no one instruction (except maybe NOP) can be mixed with
+  INT, RET, CALL, JMP, JXX, or FPU/MMX instructions.
+
+  "Source object set" is a set of objects to be read.
+
+  "Destination object set" is a set of objects to be written/modified.
+
+  Any destination object supersedes source object.
+  I mean that in "ADD EAX, EBX" instruction, EBX is source object,
+  and EAX is both source and destination object,
+  but we say that EAX is destination object only,
+  and we never say that EAX is source;
+  however, we always keep in mind that any destination object
+  can be also (indirectly) source object.
+  But, if we have "ADD ECX, ECX" instruction, we MUST include 2nd (src) ECX
+  into source object set.
+
+  Lets consider some typical instructions:
+
+  INSTRUCTION             DESTINATION OBJECT SET        SOURCE OBJECT SET
+
+  nop                     <none>                        <none>
+  mov R1, R2              R1                            R2
+  cmp R1, R2              flags                         R1, R2
+  add R1, R1              R1, flags                     R1
+  adc R1, R2              R1, flags                     R2, flags
+  mov R1, [R2+R3]         R1                            R2, R3, memory
+  add R1, [R2+R3]         R1, flags                     R2, R3, memory
+  sub [R1+R2], R3         flags, memory                 R1, R2, R3
+  test [R1+R2], R3        flags                         R1, R2, R3, memory
+  inc R1                  R1, flags                     <none>
+  lea R1, [R2+R3]         R1                            R1, R2
+  xchg R1, [R2]           R1, memory                    R2
+  push R1                 ESP, memory                   R1
+  pop R1                  ESP, R1                       memory
+  cld                     flags                         <none>
+  lods                    ESI, EAX                      flags, memory
+  rep lods                ESI, EAX, ECX, flags          flags, memory
+  stos                    EDI, memory                   EAX, flags
+  rep stos                EDI, ECX, memory, flags       EAX, flags
+  rep cmps                ESI, EDI, ECX, memory, flags  memory
+
+2.1. TWO instructions
+
+  let they look as
+
+  CMD1 DST1, SRC1
+  CMD2 DST2, SRC2
+
+  where DST1, SRC1, DST2, SRC2 are source/destination object sets.
+  Any of these sets could be empty.
+
+  We also assume that both instructions are already filtered/checked,
+  i.e. no one of them is JMP, CALL, RET, etc.
+
+  So, we have 4 sets, and we have 6 relations between
+  each 2 of these sets. {C(4,2) = 4!/2!*(4-2)! = 6}
+
+2.2. Simple conditions
+
+  Each of six relations is bitwise AND operation on the two bitsets, returning
+  logical ZERO or NON-ZERO. In other words, each two sets can intersect or not.
+
+  #define INTERSECT(bitset_X, bitset_Y)  ((bitset_X & bitset_Y) != 0)
+
+  Here is 3 conditions, when it is possible to swap two instructions:
+
+   (DST1 & DST2) == 0                                                [1]
+   (DST1 & SRC2) == 0                                                [2]
+   (DST2 & SRC1) == 0                                                [3]
+
+  Other 3 (unused) relations looks as following:
+
+   (DST1 & SRC1) == whatever                                         [4]
+   (DST2 & SRC2) == whatever                                         [5]
+   (SRC1 & SRC2) == whatever                                         [6]
+
+  Example:
+
+  add eax, ebx          # cmd1=ADD  dst1={EAX,flags}  src1={EBX}
+  sub ebx, ecx          # cmd2=SUB  dst2={EBX,flags}  src2={ECX}
+  [1] == FALSE      {EAX,flags} intersects {EBX,flags}
+  [2] == TRUE       {EAX,flags} doesnt intersects {ECX}
+  [3] == FALSE      {EBX,flags} intersects {EBX}
+
+  as such, these two instructions can not be swapped.
+
+
+2.3. Advanced conditions
+
+  There exists some advanced conditions, which requires more analysis.
+  In such a cases, some of [1], [2], [3] conditions can be ignored.
+
+  For example:
+
+   (CMD1 == CMD2) && (DST1 == DST2) && [2] && [3]                    [7]
+
+  or
+
+   #define GROUP_1(cmd)  ((cmd == ADD) || (cmd == SUB))
+   GROUP_1(CMD1) && GROUP_2(CMD2) && (DST1 == DST2) && [2] && [3]    [8]
+
+  For example (below), [1] is FALSE, but since [8], the following
+  instructions can be swapped:
+
+  add eax, ecx
+  sub eax, edx
+
+  Now, imagine, that we have the following commands:
+
+  mov [ebp+4], eax
+  mov [ebp+8], ecx
+
+  Such a situation should be handled in a special way;
+  otherwise our theory will grow to contain lists of variables in the
+  object sets; also this will require checking for intersection
+  of memory ranges & etc.
+
+  Except that all, we can ignore condition [1], in cases when instructions
+  are followed by code which doesn't uses DST1 and DST2 object sets.
+  But this will require much more analysis, and i think it is not optimal.
+
+3. From single instruction to block of instructions
+
+  Imagine that we have these instructions (following each other):
+
+  [a] add eax, ecx
+  [b] adc eax, edx
+  [c] add ebx, ecx
+  [d] adc ebx, edx
+  [e] sub esi, edi
+
+  We can not swap [a] and [b], and we can not swap [c] and [d].
+  But we can swap [ab] and [cd].
+
+  As such, we need some entity to replace consecutive instructions with.
+
+4. ONE block of N instructions
+
+  CMD1 DST1, SRC1
+  CMDi DSTi, SRCi
+  CMDN DSTN, SRCN
+
+  If we will consider this block as a single instruction,
+  how to calculate summary SUM_DST and SUM_SRC object sets?
+  I.e. sets of objects which are read and written by that code block.
+
+  Simplest way is to do BITWISE OR for all SRC/DST[i]; it is correct,
+  but then the we will lose some possibilities in the future,
+  as shown in the following example:
+
+   mov eax, ebx
+   add eax, ecx
+   adc edx, eax
+
+  here, SUM_SRC, if calculated as SRC1|SRC2|SRC3, is equal to
+  EBX|ECX|EAX, however it is not necessary to include EAX into that set,
+  since it is initialized inside of this block, but not passed into.
+
+  So, algorithm of calculating SUM_SRC and SUM_DST is the following:
+
+  SUM_SRC = 0
+  SUM_DST = 0
+  for(i = 0; i < N; i++)           # in the example shown above (N=3):
+  {                                #       i =    0      1          2
+    SUM_SRC |= SRC[i] & (~SUM_DST) # SUM_SRC =  {EBX}  {EBX,ECX}  {EBX,ECX}
+    SUM_DST |= DST[i]              # SUM_DST =  {EAX}  {EAX}      {EAX,EDX}
+  }
+
+5. TWO BLOCKS
+
+  Working with blocks is the same as working with single instructions,
+  except that SUM_SRC and SUM_DST should be calculated, as it were
+  shown above.
+
+  You can swap two blocks, or block and single instruction, it doesn't matter.
+
+6. How to find out object sets for some given instruction?
+
+  Probably, using something like ADE32 and some additional analysis.
+
+<eof>

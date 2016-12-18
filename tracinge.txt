@@ -1,0 +1,176 @@
+
+                            TRACING UNDER WIN32
+
+                              (x) 2000 Z0MBiE
+                           http://z0mbie.host.sk
+
+  Tracing here considered as a part of the win32 debug features.
+  As i think, some stuff described here is used in the turbodebugger.
+
+  Now, what do we need it for.
+
+  Lets consider PE format infecting.
+  1. We can directly replace address of the PE entrypoint with viral one.
+     Such thing may be detected even without heuristic analysis;
+     the condition is that entrypoint points to the end of file.
+  2. We can insert jmp to the virus body into program startup address;
+     so, emulation will easy skip such jmps.
+     If we will replace jmps with something more complex,
+     then avers will just write special subprogram.
+  3. We can insert jmp to the viral body into random program place.
+     This method is many times better than first ones.
+     But, we can not know if selected address is code or data,
+     and, moreover, if this address is first instruction byte.
+     In case we use PUSH EBP/MOV EBP,ESP and alike as a signature for
+     our patch, then it may be easy found.
+     Anyway, avers may scan file at all addresses pointed by
+     jmps and calls.
+     And, the main disadvantage is that in this method we can not know
+     if (and when) our instructions will be executed.
+  4. Code analysis without execution.
+     The best implementation of this method may be performed using IDA and
+     some brains. Alike, but greatly simplified algorithms i've been used
+     in the ZCME/AZCME(dos) and RPME/CODEPERVERTOR(win32).
+     These things works fast and can correctly distinguish code and data.
+     But, here we have big disadvantage too.
+     In the case if some part of code is never executed, but is linked,
+     for example with conditional jmp (jxx), such code will be marked as
+     "normal" one.
+  5. Tracing.
+     This method allows us to mark only executable (not all!) code,
+     and even to find order of instructions and subprograms execution.
+
+  But, what the fuck do we need this order to?
+  Here is hidden the amazing thing,
+  whose mission is to completely fuckup antiviral asshole.
+  Such attempts were made under dos, but as it seems, without a result.
+
+  So, badly encrypted viral body may be anywhere in file.
+  And this body should be called not by single jmp -- because such thing
+  is easy detectable -- but with some instructions inserted
+  into different program places, but with defined execution order.
+
+  But this text describes only tracing, and not a bit more.
+
+  So, lets begin.
+
+  For process which is not executing now, debugging begins with
+  CreateProcessA function with DEBUG_PROCESS+DEBUG_ONLY_THIS_PROCESS flags.
+  If process is opened, then DebugActiveProcess may be used.
+
+  After called function returned success, we may run main cycle.
+  In the beginning of this cycle WaitForDebugEvent is called,
+  and each debug_event passed to our program is analyzed.
+
+; DEBUG_EVENT
+de                      label   byte
+de_code                 dd      ?
+de_pid                  dd      ?
+de_tid                  dd      ?
+de_data                 db      1024 dup (?) ; no matter that real length is
+
+  After this structure is processed, ContinueDebugEvent is called,
+  and we can execute WaitForDebugEvent again.
+
+  Now, about event structure. de_code member holds event's id.
+  de_pid and de_tid members are identifiers of the current debugging
+  process and thread, this event generated for.
+
+  Now, events which may be passed to our debugger.
+
+    CREATE_PROCESS_DEBUG_EVENT -- seems it is first event passed to us;
+                                  de_data contains such things as
+                                  file, process and thread handles,
+                                  main thread start address and other shit.
+
+    LOAD_DLL_DEBUG_EVENT       -- such events are generated when each new
+                                  DLL is loaded into debugging context.
+
+    EXIT_PROCESS_DEBUG_EVENT   -- such events tells us that we should break
+    RIP_EVENT                  -- main cycle
+
+    CREATE_THREAD_DEBUG_EVENT  -- should be handled, if we're going to debug
+                                  all threads
+
+    EXIT_THREAD_DEBUG_EVENT    -- use it when tracking information
+                                  for each thread
+
+    UNLOAD_DLL_DEBUG_EVENT     -- we dont need it
+    OUTPUT_DEBUG_STRING_EVENT
+
+    EXCEPTION_DEBUG_EVENT      -- mostly interesting event, means
+                                  INT1, INT3 and all the possible
+                                  exceptions.
+
+    Here are some interesting things.
+    1. Before calling debugging program, system calls kernel's DebugBreak
+       function, which performs INT3.
+    2. By default, TF (trace) flag is cleared, and INT1 events are not
+       generated. As it seems, system clears this flag each time it is
+       possible, so debugger must set it on each INT1/INT3 event.
+
+    To work with debugging process memory
+    ReadProcessMemory and WriteProcessMemory functions are used.
+
+    To work with debugging thread registers
+    GetThreadContext and SetThreadContext functions are used.
+
+    So, structure of the tracer/debugger is the following:
+
+    CreateProcessA()
+    while(1)
+    {
+      WaitForDebugEvent()
+      if (EXIT_PROCESS_DEBUG_EVENT or RIP_EVENT) break
+      if (EXCEPTION_DEBUG_EVENT)
+      {
+        if (int1 or int3)
+          set_trace_flag()
+      }
+      ContinueDebugEvent()
+    }
+
+    Such tracer will have big disadvantage: it will trace not only
+    debugging process (i mean .exe file), but all the DLLs used.
+    If such DLLs has own entrypoints, they will be traced BEFORE
+    main entrypoint, which is sux. Moreover, when debugging process
+    calls one of these DLLs, the calling subroutine is traced too.
+    Also, such simple algorithm doesn't support threads.
+
+    To skip DLL's entrypoints in the beginning of the tracing:
+    1. skip kernel's INT3 (in the DebugBreak), and do not set TF.
+    2. write two subroutines: to insert INT3 into the program and
+       to restore original byte, by address.
+    3. on CREATE_PROCESS_DEBUG_EVENT event insert INT3 into
+       main thread's lpStartAddress
+
+    To skip DLL's subroutines, check current address, and if it is
+    out the of main program's range, then
+    1. take DWORD from the stack, it is the return address; insert INT3 there
+    2. clear TF
+
+    To support multiple threads:
+    1. insert INT 3 into lpStartAddress when each new thread is created
+    2. keep information about all the threads, i.e. ThreadId<-->ThreadHandle
+    3. on int1/int3 exceptions, convert given TheadId into ThreadHandle
+    4. update information about id's<-->handle's when threads are created
+       and deleted.
+
+    In addition.
+    When exception is generated and handled by SEH,
+    SEH handlers receives control with TF cleared.
+    So this thing may be used to fuck tracer.
+
+    How to solve this problem? This is hard.
+    1. on exception (not INT1/INT3), take debugging thread's FS
+    2. knowing FS, use GetThreadSelectorEntry to find VA of the FS:[0]
+    3. analyze SEH's structure and find out SEH handler address
+    4. insert INT3 there
+
+    Seems, this is all.
+    All the things described here are shown in the tracer32 program.
+
+    Now, how to use this stuff in real life.
+    1. select a program
+    2. trace it 2-3 seconds
+    3. use found address to insert JMP to

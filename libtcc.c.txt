@@ -1,0 +1,70 @@
+/*
+ * Simple Test program for libtcc // modified
+ *
+ * libtcc can be useful to use tcc as a "backend" for a code generator.
+ *                                                ^^^^^^^^^^^^^^^^^^^^
+ */
+
+ // nb: compiled win32 .exe uses ~80k
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdarg.h>
+
+#include "src/libtcc.h"
+
+void addcode(char* src, char* fmt, ...)
+{
+  va_list va;
+
+  va_start(va, fmt);
+  sprintf(src+strlen(src), fmt, va);
+  va_end(va);
+}
+
+int main(int argc, char *argv[])
+{
+    TCCState *s;
+    //int (*func)(int);
+    unsigned long val;
+    char* src;
+
+    s = tcc_new();
+    if (!s) {
+        fprintf(stderr, "Could not create tcc state\n");
+        exit(1);
+    }
+
+    src = malloc(0x29A*0x29A);
+    src[0] = 0;
+
+    addcode(src,"void decrypt(unsigned long ptr, unsigned long count)" );
+    addcode(src,"{"                                                    );
+    addcode(src,"  unsigned long keys[4];"                             );
+    addcode(src,"  keys[0] = 0x11111111;"                              );
+    addcode(src,"  keys[1] = 0x22222222;"                              );
+    addcode(src,"  keys[2] = 0x33333333;"                              );
+    addcode(src,"  keys[3] = 0x44444444;"                              );
+    addcode(src,"  count = (count + 3) >> 2;"                          );
+    addcode(src,"  while(count--)"                                     );
+    addcode(src,"  {"                                                  );
+    addcode(src,"    *((unsigned long*)ptr) ^= keys[count % 4];"       );
+    addcode(src,"    ptr += 4;"                                        );
+    addcode(src,"  }"                                                  );
+    addcode(src,"}"                                                    );
+
+    /* MUST BE CALLED before any compilation or file loading */
+    tcc_set_output_type(s, TCC_OUTPUT_OBJ);
+
+    tcc_compile_string(s, src/*my_program*/);
+
+    tcc_output_file(s,"1.bin");
+
+    tcc_delete(s);
+
+    exit(0);
+    return 0;
+
+} /* main() */
+
+/* EOF */

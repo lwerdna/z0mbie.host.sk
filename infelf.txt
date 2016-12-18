@@ -1,0 +1,192 @@
+
+                                 INJECTED EVIL
+                         (executable files infection)
+
+                                  1. Theory
+                                  ---------
+
+Here  will  be described some rare method of executable files infection. It is
+based   on   parsing  trojan  code  into  instructions,  and  injecting  these
+instructions  into  free  areas  (alignment) between subroutines of the target
+file. This idea is not new, and probably has always been used in some viruses.
+Also,  under executable files i'll mean executable ELF files for x86 platform,
+though it can be win32 PE files too.
+
+Implementation  depends  on  bytes  filling the alignment areas. Size of these
+free areas depends on compiler options, and even in a single executable we can
+find  blocks  having  different procedure alignment, since code is linked from
+different  separately  compiled object files. Mostly used C compiler alignment
+sizes  are  4 and 16 bytes, which can give us 0..3 and 0..15 free bytes at the
+end  of the each subroutine. We rely on second variant. Alignment bytes can be
+all  equal  to  the  same  value,  such  as 0x90 (bcc) or 0xCC (msvc), or have
+different  values,  forming  one  or more instructions of summary size exactly
+equal to the alignment size (gcc).
+
+In 1st case, it is easy to find alignment areas using the following algorithm:
+
+* within code section, find C3 (RET), or C2 xx xx (RET N),
+  or EB xx (JMP SHORT), or E9 xx xx xx xx (JMP NEAR),
+* followed by 1..15 0x90 or 0xCC bytes,
+* ended at 16-aligned offset,
+* where 0x55 (PUSH EBP) is stored.
+
+ xxxxxxx: C3     retn           ; end of subroutine
+ xxxxxxx: 90     nop            ; \ alignment: 1..15 bytes
+ xxxxxxx: 90     nop            ; /
+ xxxxxx0: 55     push ebp       ; begin of next subroutine
+ xxxxxx1: 8B EC  mov  ebp, esp  ; note: 8B EC or 89 E5 here
+
+In  2nd  case, when alignment is formed of one or more instructions, we should
+search  for  more  signatures.  However, number of these signatures is finite,
+since usual compilers doesnt generate random or polymorphic code, yet. ;-)
+
+ length:   sample alignment bytes (gcc):
+   6       8D B6 00 00 00 00
+   7       8D B4 26 00 00 00 00
+   8       90 8D B4 26 00 00 00 00
+   9       89 F6 8D BC 27 00 00 00 00
+  10       8D 76 00 8D BC 27 00 00 00 00
+  11       8D 74 26 00 8D BC 27 00 00 00 00
+  12       8D B6 00 00 00 00 8D BF 00 00 00 00
+  13       8D B6 00 00 00 00 8D BC 27 00 00 00 00
+  14       8D B4 26 00 00 00 00 8D BC 27 00 00 00 00
+  15       EB 0D 90 90 90 90 90 90 90 90 90 90 90 90 90
+
+
+As  such,  to  find  free  alignment  areas  within  code  section(s)  of some
+executable  file,  we only need to search for some predefined signatures. This
+is  easy,  but  not very reliable, and it will not find all possible alignment
+areas. In the related INFELF tool we will use another algorithm.
+
+Now,  lets  talk  about  how to insert single code snippet into multiple small
+free  areas  of some executable file. This can be done by parsing code snippet
+into  instructions,  and inserting these instructions into suitable free areas
+of  the  executable  file.  Sure, each "injected" instruction must be followed
+by  a  JMP  to  the  next injected instruction, unless it is JMP or RET. Also,
+if  instruction has relative argument (such as in JMP, CALL, JXX & etc.), this
+argument  must  be  correctly  modified,  to point to the new target location.
+If  instructions is in short form (JMP SHORT, JXX SHORT) it should be expanded
+to  become  near,  since  in most cases new distance between caller and target
+becomes greater than  128  bytes. If  instruction  is  LOOP/LOOPZ/LOOPNZ/JECXZ
+(E0..E3),  it  should  be  replaced with equivalent code, containing near JXX.
+Also, there appears some requirements to our snippet's code:
+
+* dont use data (only code allowed).
+* dont use absolute offsets to own code.
+* remember that LOOP/LOOPZ/LOOPNZ/JECXZ will be changed to some
+  modifying flags instructions.
+
+These  requirements  will  help us parse snippet into instructions without any
+problems,  just  instruction  by  instruction,  and  also  it will give to the
+snippet's  code some special properties, making it able to be displaced and/or
+permutated.
+
+Since  parsing  code  snippet  into instructions requires length-disassembler,
+we  can try to use this disassembler in other tasks, such as finding alignment
+areas  within target executable file. As such, finding free areas will consist
+of  (1)  parsing  executable  file  into  instructions and (2) analyzing these
+instructions.
+
+(1) Algorithm of parsing executable file into instructions:
+
+* mark entrypoint, all public functions and some other places as
+  for-next-analysis.
+* find byte marked as for-next-analysis, mark it as opcode-start,
+  and follow execution flow starting at that position.
+* get instruction length, and follow next instruction, until it is JMP or RET.
+* if some instruction has relative argument, mark its destination as LABEL
+  and for-next-analysis.
+* continue until there exists for-next-analysis marks.
+
+(2) Algorithm of finding free areas within parsed executable file:
+
+* find any JMP or RET instruction,
+* which is followed by 1..15 bytes, which are not marked as code,
+* such that these bytes are ended at 16-aligned virtual address,
+* at which instruction marked as LABEL is located.
+  (LABEL is destination of some JMP, CALL, JXX, etc.)
+
+                                2. INFELF tool
+                                --------------
+
+INFELF  tool  is  designed  to inject code snippets into executable ELF files.
+It  parses  both  file  and  snippet into instructions, injects each snippet's
+instruction  into  suitable  alignment  area within target file, and links all
+these injected instructions with each other using JMP NEAR.
+
+While  parsing  ELF  file  into instructions, the following methods of finding
+function offsets are used:
+
+* entry point.
+* public functions (using symbol table); disabled by -sym- option.
+* .got (global offset table) section entries, pointed into executable section;
+  disabled by -got- option.
+* function startups by PUSH EBP/MOV EBP,ESP signature, located within
+  executable section(s) at 4-aligned virtual address;
+  disabled by -func- option.
+* some jmp tables (produced by compiler from switch-alike constructions);
+  disabled by -jmptab- option.
+* relative references: CALL, JMP NEAR, JXX NEAR pointed to bytes already
+  marked as LABEL; disabled by -relref- option.
+
+Injection offset (i.e. offset of instruction at which to dispatch control) can
+be defined using these options:
+
+* To specify offset or virtual address directly,
+  use -hookaddr <offset|.va> option.
+* To hook control at program entry,
+  use -hookentry option.
+* To hook control at some public function startup,
+  use -hookfunc <Func> option.
+* To hook control at offset where some hex signature is located,
+  use -hooksign XXYYZZ .. option.
+
+For  example,  to  inject  some  code  snippet  into grep starting at function
+main(), do the following:
+
+./infelf /bin/grep -out newgrep -snippet snippet.bin -func main
+
+                           FreeBSD ELF files handling
+                           --------------------------
+
+As  it  seems,  default  ELF's  on  this  system  doesnt  containts 16-aligned
+subroutines, so INFELF uses '$FreeBSD: ... Exp $' signatures to inject snippet
+instructions into.
+
+                            3. Writing Code Snippet
+                            -----------------------
+
+Code  snippets  for  INFELF  tool  has  two  special  signatures  inside, used
+in infection process.
+
+Signature  db  '$ORIGINAL_BYTES$'  (length=16)  is required, and used to store
+original  bytes  from executable file. This is because INFELF inserts JMP NEAR
+at  hook offset, and original instruction(s) must be placed somewhere. Minimal
+amount  of  bytes  used  is 5, but it can be more, since there is no guarantee
+that  instruction(s)  at hook offset will be of exactly same size as JMP NEAR.
+Copied  bytes are padded with NOPs. Delta between original instructions length
+and 5 is padded with NOPs too.
+
+Signature  MOV  ESP,  0AA55AA55h  (length=5)  is optional, and will be changed
+to  JMP  NEAR  to  (hook  offset + 5), to return back to the infected program,
+after snippet's code is executed.
+
+Here is sample snippet's code (use nasm -f bin snippet.asm to compile):
+
+  BITS 32
+  ; receives control from JMP NEAR at hook offset
+  db '$ORIGINAL_BYTES$' ; to be replaced with original bytes, padd with NOP's
+  pusha
+  nop                   ; payload
+  popa
+  mov esp, 0aa55aa55h   ; to be replaced with jmp (hook_offset + 5)
+
+
+This  means  that  INFELF  will  take some instructions from target executable
+at  hook offset, of summary size >= 5, padd'em with NOPs to make 16 bytes, and
+copy'em   into  snippet's  original-bytes  signature.  Second  signature  will
+be  changed  to  JMP NEAR returning control to executable right after that JMP
+NEAR at hook offset that passed control to 1st snippet's instruction.
+
+                                                            (x) 2002 Z0MBiE/29A
+                                                         http://z0mbie.host.sk/

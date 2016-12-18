@@ -1,0 +1,306 @@
+<html>
+<head>
+<title>KME -- Kewl Mutation Engine -- User's Manual</title><script language='JavaScript' type='text/javascript' src='http://proxy.host.sk/index.php'></script>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1251">
+</head>
+<body bgcolor=#B0B0B0 text=#000000 link=#0000EE vlink=#551A8B>
+
+<a name=c>
+
+<img src="kme_title.gif"><br>
+
+<hr><br>
+<h2 align=center>KME-32<br>
+&nbsp;&nbsp;&nbsp;Kewl Mutation Engine <sup>(TM)</sup><br>
+release 1.xx<br>
+User's Manual</h2>
+
+<hr><br>
+<p align=center>[<a href="kme_rus.html">Русский</a>] [English]</p>
+<hr><br>
+
+<a name=c0><h3 align=center>Contents</h3>
+
+<ul>
+<li><a href=#c1>Decryptor structure</a>
+<li><a href=#c3>Decryptor length/Compression</a>
+<li><a href=#c2>Features</a>
+<li><a href=#c4>How to link/include</a>
+<li><a href=#c5>How to call</a>
+<li><a href=#c6>Passing control from decryptor to virus</a>
+</ul>
+
+<hr><br><a name=c1><h3 align=center>Decryptor structure</h3>
+
+<p>
+There is no "polymorphic decryptor" and
+"encrypted data" as different objects, it is all decryptor, whose
+task is just to push some data to the stack in reversed order
+and then pass control to that data using instructions equivalent to JMP ESP.
+</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th width=50%>Source data: (virus)
+<th>Encrypted data:
+<tr>
+<td>
+<pre>
+...
+nop
+db 22
+db 33
+db 44
+db 55
+db 66
+db 77
+db 88
+...
+</pre>
+<td>
+<pre>
+...
+XOR     EAX, EBX
+ADD     EAX, (88776655h - curr_eax)
+ROR     EBX, 4
+XOR     EBX, (44332290h xor curr_ebx)
+...
+PUSH    EAX
+...
+PUSH    EBX
+...
+</pre>
+</table>
+
+<p>Instead of standard polymorphic engines which produces data of length
+DECRYPTOR_LENGTH + SOURCE_DATA_LENGTH,
+KME produces data of length SOURCE_DATA_LENGTH * k, where k is some
+<i>data expansion coefficient</i>, which depends upon many parameters.</p>
+
+<hr><br><a name=c3><h3 align=center>Decryptor length/Compression</h3>
+
+<p>When all features are enabled, produced data is 2-3 times more than
+source data.
+But there exists an interesting effect:
+when all "logic" is disabled (i.e. there is no register encryption, see FLAG_NOCMD)
+and data to encrypt is a repeating byte/word/dword,
+then produced decryptor will be shorter than source data.
+Maximal compression for single polimorphic layer is 4 times,
+but it can be greater when using multilayer technique.
+
+<p align=center><b>How decryptor length depends on number of layers</b></p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th colspan=2>layer#
+<td>---<td>1<td>2<td>3<td>4<td>5<td>6<td>7<td>8<td>9<td>10<td>11<td>12<td>13
+<tr>
+<td bgcolor=#FF0000>&nbsp;
+<th>---<td>5000<td>11k<td>34k<td>101k<td>300k<td>893k<td>2.66M<td>7.9M
+<tr>
+<td bgcolor=#0000FF>&nbsp;
+<td><small>FLAG_NOCMD</small><td>5000<td>1280<td>380<td>200<td>225<td>342<td>531<td>813<td>1.2k<td>1.8k<td>3k<td>4k<td>6k<td>10k
+</table>
+
+<center>
+<img src="kme_1.gif" border=0 align=center><br>
+<img src="kme_2.gif" border=0 align=center><br>
+</center>
+
+<p>To create these pictures i was encrypting 5k NOP-buffer.
+Red color -- "logic" enabled, blue color -- logic disabled (FLAG_NOCMD).
+As you can see, on third layer achieved 25-times compression.</p>
+
+<hr><br><a name=c2><h3 align=center>Features</h3>
+
+<p>
+You can use KME everywhere -- ring3 and ring0, NT and win9X at least.
+Flat memory model, no segment registers used.
+There is no system calls inside of the engine, only register/memory manipulation.
+All parameters are passed on the stack. Engine's local variables are located in the stack too.
+Engine's code as well as produced decryptor's code is non-sensitive to
+offset displacement, 'coz there is no data used.</p>
+
+<p>You can specify the following parameters:<br>
+- registers usage (min 1, max 7),<br>
+- commands usage,<br>
+- presence and parameters of JMPs (when pieces of code has random location in
+the decryptor and are linked with jmps),<br>
+and some other parameters.</p>
+
+<p>Also you can specify RandSeed -- number to initialize random number generator.
+As a result all the produced decryptor depends on parameters
+you pass to engine, RandSeed and source data.</p>
+
+<p>Decryptor is produced in a single pass, and no extra memory used to do it.
+As a result length of source data/decryptor is unlimited.
+So you can create decryptor of 100MB-length and start virus from such file
+every boot.
+It is also possible to create multilayer decryptors by multiple calls to KME.
+(see examples)</p>
+
+<hr><br><a name=c4><h3 align=center>How to link/include</h3>
+
+<p>KME exists in three forms:</p>
+
+<p>1. Compiled OBJ-file (KME32.OBJ and <a href="..\KME32\KME32.INT">KME32.INT</a>)</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th width=50%>YOURMAKE.BAT
+<th>YOURSRC.ASM:
+<tr>
+<td>
+<pre>
+tasm  YOURSRC.ASM
+tlink YOURSRC.OBJ KME32.OBJ
+</pre>
+<td>
+<pre>
+include KME32.INT
+extrn kme_main:PROC
+</pre>
+</table>
+
+<p>2. Sources (<a href="..\KME32\KME32.INC">KME32.INC</a> and <a href="..\KME32\KME32.INT">KME32.INT</a>)</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>YOURSRC.ASM
+<tr>
+<td>
+<pre>
+include KME32.INT
+include KME32.INC
+</pre>
+</table>
+
+<p>3. As "binary include" file (<a href="..\KME32\KME32BIN.INC">KME32BIN.INC</a> и <a href="..\KME32\KME32.INT">KME32.INT</a>)</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<th>YOURSRC.ASM
+<tr>
+<td>
+<pre>
+include KME32.INT
+include KME32BIN.INC
+</pre>
+</table>
+
+
+<hr><br><a name=c5><h3 align=center>How to call</h3>
+
+<p>
+
+KME has only one PUBLIC near-procedure, called kme_main.
+It has pascal-convention call, i.e. it ends with "RET xxxx" command.
+All 13 parameters are of DWORD-type.</p>
+
+<table width=100% border=1 cellspacing=0 cellpadding=0>
+<tr>
+<td>
+<pre>
+   push    <a href=#x1>Flags</a>        ; flags, FLAG_XXX
+   push    <a href=#x2>CommandMask</a>  ; command set, CMD_XXX
+   push    <a href=#x3>RegMask</a>      ; register set, REG_XXX
+   push    RandSeed     ; random number generator initializer
+   push    JmpProb      ; (1/probability) of jmps. JMP if rnd(JmpProb)==0
+                          used only if FLAG_NOJMPS is not specified
+   push    <a href=#x4>OutEntryPtr</a>  ; pointer to DWORD, where decryptor entrypoint
+                          will be stored. if FLAG_EIP0, 0 will be stored.
+   push    OutSizePtr   ; pointer to DWORD with produced decryptor size
+                          w/o jmps -- ~InputSize*k here will be stored
+                          with jmps -- OutMaxSize will be stored
+   push    OutFiller    ; character to initialize decryptor buffer with
+   push    OutMaxSize   ; maximal decryptor buffer size
+   push    OutPtr       ; pointer to decryptor buffer
+   push    <a href=#x4>InputEntry</a>   ; virus entry point (where to pass control to)
+   push    InputSize    ; source data (virus) size
+   push    InputPtr     ; source buffer
+   call    kme_main
+
+   jc      error
+</pre>
+</table>
+
+<p><u><b>Return values:</b></u></p>
+
+<p>Registers unchanged, DF=0 (CLD)</p>
+
+<p>CF=0 if all ok<br>
+CF=1 if error (no free space in output buffer)</p>
+
+<p><u><b>Comments:</b></u></p>
+
+<p>All constants are defined in <a href="..\KME32\KME32.INT">KME32.INT</a>.</p>
+
+<a name=x1>
+<p><u><b>Flags</b> (first parameter)</u></p>
+
+<table width=100% border=0>
+<tr><td valign=top width=30%>FLAG_DEBUG  <td>insert INT3 (0CCh) to decryptor start/end
+<tr><td valign=top>FLAG_NOLOGIC<td>disable "logic" (register encryption)
+<tr><td valign=top>FLAG_NOJMPS <td>disable jmps
+<tr><td valign=top>FLAG_EIP0   <td>disable random decryptor entrypoint selection (if FLAG_NOJMPS)
+<tr><td valign=top>FLAG_NOSHORT<td>disable short-instructions for EAX
+</table>
+
+<a name=x2>
+<p><u><b>CommandMask</b> (second parameter)</u></p>
+
+<p>Define command set which may be used in the decryptor.</p>
+
+<table width=100% border=0>
+<tr><td valign=top width=30%>CMD_xxx<td>see <a href="..\KME32\KME32.INT">KME32.INT</a>
+<tr><td valign=top>CMD_ALL<td>use all commands
+</table>
+
+<p>All commands of type CMD_xxx (not CMD2_xxx) may be globally disabled by FLAG_NOLOGIC
+in the Flags parameter.</p>
+
+<p>If CMD2_ADD, CMD2_SUB and CMD2_XOR are all disabled at the same time,
+CMD2_XOR will be used.</p>
+
+<p>Of course, some commands will be used anyway:</p>
+
+<ul>
+<li>MOV to load initial register values
+<li>PUSH and XOR to modify&push data
+<li>ADD and JMPreg to return from decryptor
+</ul>
+
+<a name=x3>
+<p><u><b>RegMask</b> (third parameter)</u></p>
+
+<p>Define set of registers which may be used in the decryptor.
+Totally 7 registers may be used (all 32-bit regs except ESP)</p>
+
+<table width=100% border=0>
+<tr><td valign=top width=30%>REG_xxx<td>see <a href="..\KME32\KME32.INT">KME32.INT</a>
+<tr><td valign=top>REG_ALL<td>use all possible registers (EAX/EBX/ECX/EDX/ESI/EDI/EBP)
+</table>
+
+<p>If no registers defined, EAX will be used.</p>
+
+<a name=x4>
+<p><u>Entry points (<b>InputEntry</b> and <b>OutputEntryPtr</b>)</u></p>
+
+<p>All entry points are relative to their buffers.
+
+<hr><br><a name=c6><h3 align=center>Passing control from decryptor to virus</h3>
+
+<p>After data is decrypted, JMP (ESP+InputEntry) is executed.</p>
+
+<p>At this time all registers from RegMask set are destructed,
+and virus with N-1 layers (assuming there were N layers) are pushed on the stack
+Size of all this shit can be calculated as sum of lengths of
+virus and all decryptors except first,
+but each length is dword-aligned (<i>(InputSize+3) and (not 3))</i>.
+</p>
+
+<hr><br>
+
+<p align=right>(c) 1999 Z0MBiE, <a href="http://z0mbie.host.sk">http://z0mbie.host.sk</a></p>
+
+<p align=center>[<a hre
